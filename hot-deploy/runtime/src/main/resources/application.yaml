@@ -1,0 +1,36 @@
+spring:
+  application:
+    name: runtime
+  security:
+    user:
+      name: runtime-admin
+      password: ${RUNTIME_ADMIN_PASSWORD}
+      roles: RUNTIME_ADMIN
+
+runtime:
+  hot-deploy:
+    repository-root: deployments/repository
+    drain-timeout: 30s
+    rollback-retention-count: 1
+    rollback-retention-ttl: 5m
+    max-artifact-history: 100
+    max-artifact-bytes: 20971520
+    max-jar-entries: 2000
+    max-uncompressed-bytes: 52428800
+    runtime-api-version: 0.0.1
+    allowed-class-prefixes:
+      - my/spring/research/app/
+    refresh-allowlist:
+      - runtime.message.prefix
+      - runtime.hot-deploy.drain-timeout
+      - runtime.hot-deploy.rollback-retention-count
+      - runtime.hot-deploy.rollback-retention-ttl
+
+management:
+  server:
+    address: 127.0.0.1
+    port: 8081
+  endpoints:
+    web:
+      exposure:
+        include: health,info,hotdeploy

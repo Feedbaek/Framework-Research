@@ -1,0 +1,65 @@
+# Codex / oh-my-codex local state
+.omx/
+**/.omx/
+
+# Gradle caches and generated outputs
+.gradle/
+**/.gradle/
+build/
+**/build/
+bin/
+**/bin/
+
+# Do not hide source packages that happen to be named build or bin
+!**/src/main/**/build/
+!**/src/test/**/build/
+!**/src/main/**/bin/
+!**/src/test/**/bin/
+
+# Local hot-deploy artifact repository
+/deployments/
+
+# IDE metadata
+.idea/
+**/.idea/
+.vscode/
+**/.vscode/
+.settings/
+**/.settings/
+.classpath
+.project
+.factorypath
+.apt_generated/
+.springBeans
+.sts4-cache/
+*.iml
+*.ipr
+*.iws
+out/
+**/out/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Logs, JVM diagnostics, and temporary files
+*.log
+*.pid
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+hs_err_pid*
+replay_pid*
+*.hprof
+*.jfr
+
+# OS metadata
+.DS_Store
+._*
+Thumbs.db
+
+# Spring Initializr guidance files retained only locally
+HELP.md

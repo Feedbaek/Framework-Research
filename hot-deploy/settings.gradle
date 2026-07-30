@@ -1,0 +1,9 @@
+pluginManagement {
+	repositories {
+		mavenCentral()
+		gradlePluginPortal()
+	}
+}
+
+rootProject.name = 'hot-deploy'
+include 'runtime-api', 'runtime', 'app'
