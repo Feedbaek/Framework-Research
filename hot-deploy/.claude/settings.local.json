@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(.\\\\gradlew.bat :runtime:test --tests 'my.spring.research.runtime.loader.ClassLoaderUnloadProbeTest' --console=plain)",
+      "PowerShell(.\\\\gradlew.bat :runtime:test --tests 'my.spring.research.runtime.deploy.RedeployUnloadProbeTest' --console=plain)",
+      "PowerShell([xml]$x = Get-Content runtime\\\\build\\\\test-results\\\\test\\\\TEST-my.spring.research.runtime.deploy.RedeployUnloadProbeTest.xml; $x.testsuite.testcase | ForEach-Object { \"=== $\\($_.name\\)\"; if \\($_.failure\\) { \\($_.failure.'#text' -split \"`n\" | Select-Object -First 12\\) -join \"`n\" } else { \"PASSED\" }; \"\" })",
+      "PowerShell([xml]$x = Get-Content runtime\\\\build\\\\test-results\\\\test\\\\TEST-my.spring.research.runtime.deploy.RedeployUnloadProbeTest.xml; \"tests=$\\($x.testsuite.tests\\) failures=$\\($x.testsuite.failures\\) errors=$\\($x.testsuite.errors\\) skipped=$\\($x.testsuite.skipped\\)\"; $x.testsuite.testcase | ForEach-Object { \"  - $\\($_.name\\) [$\\($_.time\\)s]\" })",
+      "PowerShell(.\\\\gradlew.bat test --console=plain 2>&1 | Select-Object -Last 15)",
+      "PowerShell(.\\\\gradlew.bat :runtime:test --tests 'my.spring.research.runtime.loader.RuntimeAdvisorOnAppBeanProbeTest' --console=plain 2>&1 | Select-Object -Last 25)",
+      "PowerShell([xml]$x = Get-Content runtime\\\\build\\\\test-results\\\\test\\\\TEST-my.spring.research.runtime.loader.RuntimeAdvisorOnAppBeanProbeTest.xml; $x.testsuite.testcase | ForEach-Object { \"=== $\\($_.name\\)\"; if \\($_.failure\\) { \\($_.failure.'#text' -split \"`n\" | Where-Object { $_ -match 'Caused by|Error|Exception|expected|at my\\\\.spring' } | Select-Object -First 8\\) -join \"`n\" } else { \"PASSED\" }; \"\" })",
+      "PowerShell(.\\\\gradlew.bat :runtime:test --tests 'my.spring.research.runtime.loader.RuntimeAdvisorOnAppBeanProbeTest' --console=plain 2>&1 | Select-Object -Last 20)",
+      "PowerShell(.\\\\gradlew.bat :runtime:test --tests 'my.spring.research.runtime.loader.RuntimeAdvisorOnAppBeanProbeTest' --console=plain 2>&1 | Select-Object -Last 10; [xml]$x = Get-Content runtime\\\\build\\\\test-results\\\\test\\\\TEST-my.spring.research.runtime.loader.RuntimeAdvisorOnAppBeanProbeTest.xml; \"--- tests=$\\($x.testsuite.tests\\) failures=$\\($x.testsuite.failures\\) errors=$\\($x.testsuite.errors\\)\"; $x.testsuite.testcase | ForEach-Object { \"  - $\\($_.name\\)\" })"
+    ]
+  }
+}

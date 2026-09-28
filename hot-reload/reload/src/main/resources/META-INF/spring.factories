@@ -1,0 +1,5 @@
+org.springframework.boot.autoconfigure.AutoConfigurationImportFilter=\
+com.example.reload.autoconfigure.ReloadAutoConfigurationImportFilter
+
+org.springframework.context.ApplicationListener=\
+com.example.reload.autoconfigure.ReloadApplicationListener

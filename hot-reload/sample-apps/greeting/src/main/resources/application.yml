@@ -1,0 +1,18 @@
+spring:
+  application:
+    name: greeting
+
+server:
+  port: 8080
+
+reload:
+  # 부모 소유 패키지: 부모·자식이 공유하는 타입과 부모 bean. 나머지 애플리케이션 클래스는 재로딩 대상이다.
+  parent-packages: [com.example.greeting.shared]
+  # classpath, base-packages는 생략하면 @SpringBootApplication 클래스 기준으로 정해진다.
+  trigger:
+    mode: api              # watch: 파일 변경 감지 | api: POST /_reload 호출 시 | both
+    api-path: /_reload       # mode가 api/both일 때. 인증이 없으므로 개발 환경에서만 켠다
+  poll-interval: 1s
+  quiet-period: 400ms
+  drain-timeout: 30s
+  exclude-patterns: ["**/*.log"]   # 변경으로 치지 않을 패턴

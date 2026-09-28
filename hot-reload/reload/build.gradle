@@ -1,0 +1,46 @@
+plugins {
+	id 'java-library'
+	id 'maven-publish'
+}
+
+// 재로딩 엔진 라이브러리. 소비자 애플리케이션이 의존성으로 추가하면 auto-configuration으로 동작한다.
+
+java {
+	withSourcesJar()
+}
+
+dependencies {
+	def bom = platform(rootProject.ext.springBootBom)
+
+	implementation bom
+	implementation 'org.springframework:spring-webmvc'
+	implementation 'org.springframework.boot:spring-boot'
+	implementation 'org.springframework.boot:spring-boot-autoconfigure'
+
+	// 런타임에는 소비자 애플리케이션(spring-boot-starter-web)이 제공한다.
+	compileOnly bom
+	compileOnly 'jakarta.servlet:jakarta.servlet-api'
+	compileOnly 'jakarta.annotation:jakarta.annotation-api'
+	compileOnly 'com.fasterxml.jackson.core:jackson-databind'
+	// 자식 트랜잭션 인프라(ChildInfrastructureConfiguration). 없으면 조건에 걸려 건너뛴다.
+	compileOnly 'org.springframework:spring-tx'
+
+	annotationProcessor bom
+	annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor'
+
+	testImplementation 'org.springframework.boot:spring-boot-starter-web'
+	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+	// AOP 누수 테스트: 부모 aspect, 트랜잭션 advisor
+	testImplementation 'org.springframework.boot:spring-boot-starter-aop'
+	testImplementation 'org.springframework:spring-tx'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+publishing {
+	publications {
+		reload(MavenPublication) {
+			artifactId = 'reload'
+			from components.java
+		}
+	}
+}

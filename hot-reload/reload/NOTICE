@@ -1,0 +1,42 @@
+hot-reload / reload module
+
+This module contains source files copied from Spring Boot DevTools.
+
+  Project : Spring Boot (https://github.com/spring-projects/spring-boot)
+  Version : v3.5.16 (git tag v3.5.16)
+  Path    : spring-boot-project/spring-boot-devtools/src/main/java/org/springframework/boot/devtools/
+  License : Apache License, Version 2.0 (https://www.apache.org/licenses/LICENSE-2.0)
+  Copyright 2012-present the original author or authors.
+
+Copied files (package org.springframework.boot.devtools.* renamed to com.example.reload.devtools.*):
+
+  restart/classloader/RestartClassLoader.java
+  restart/classloader/ClassLoaderFile.java
+  restart/classloader/ClassLoaderFiles.java
+  restart/classloader/ClassLoaderFileRepository.java
+  restart/classloader/ClassLoaderFileURLStreamHandler.java
+  filewatch/FileSystemWatcher.java
+  filewatch/FileChangeListener.java
+  filewatch/ChangedFile.java
+  filewatch/ChangedFiles.java
+  filewatch/DirectorySnapshot.java
+  filewatch/FileSnapshot.java
+  filewatch/SnapshotStateRepository.java
+  classpath/PatternClassPathRestartStrategy.java
+  classpath/ClassPathRestartStrategy.java
+
+Modifications (also marked in each file header and at the changed code):
+
+  RestartClassLoader.getResources(String)
+    The original returns only the parent's resources because DevTools keeps the
+    restart URLs on the parent classpath too. In this project the child URLs are
+    not on the parent classpath, so the loader's own resources (findResources) are
+    returned first, followed by the parent's. Without this, classpath*: component
+    scanning in the child context finds nothing.
+
+  SnapshotStateRepository
+    Removed the STATIC constant, which referenced StaticSnapshotStateRepository
+    (a DevTools class that was not copied).
+
+The cache cleanup in com.example.reload.generation.GenerationCacheCleaner is adapted from
+org.springframework.boot.devtools.restart.Restarter#cleanupKnownCaches (same version).

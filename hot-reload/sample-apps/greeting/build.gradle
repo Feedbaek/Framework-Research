@@ -1,0 +1,50 @@
+plugins {
+	id 'org.springframework.boot'
+	id 'io.spring.dependency-management'
+}
+
+// 재로딩 엔진(reload)을 사용하는 소비자 샘플. 평범한 Spring Boot 애플리케이션이다.
+//
+// 애플리케이션 클래스는 기본적으로 재로딩 대상(자식)이고, application.yml의 reload.parent-packages에
+// 지정한 패키지와 @SpringBootApplication 클래스만 부모 소유다. reload.enabled=false이면 일반 앱으로 동작한다.
+dependencies {
+	implementation project(':reload')
+	implementation 'org.springframework.boot:spring-boot-starter-web'
+
+	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// 컴파일이 끝난 뒤 실행 중인 애플리케이션의 재로딩 API를 호출한다(reload.trigger.mode=api 또는 both).
+//   ./gradlew :sample-apps:greeting:triggerReload --continuous
+// 소스를 저장할 때마다 컴파일 → POST /_reload 순서로 한 번만 재로딩된다.
+// 포트와 경로는 -PreloadUrl=http://localhost:8080/_reload 로 바꿀 수 있다.
+tasks.register('triggerReload') {
+	group = 'application'
+	description = 'Compiles the application and asks the running application to reload (POST /_reload).'
+	dependsOn 'classes'
+	def reloadUrl = providers.gradleProperty('reloadUrl').orElse('http://localhost:8080/_reload')
+	doLast {
+		def connection = (HttpURLConnection) URI.create(reloadUrl.get()).toURL().openConnection()
+		connection.requestMethod = 'POST'
+		connection.connectTimeout = 2000
+		connection.readTimeout = 60000
+		try {
+			int status = connection.responseCode
+			def stream = (status < 400) ? connection.inputStream : connection.errorStream
+			def body = (stream != null) ? stream.getText('UTF-8') : ''
+			if (status < 400) {
+				logger.lifecycle("Reloaded: ${body}")
+			}
+			else {
+				logger.warn("Reload failed (HTTP ${status}): ${body}")
+			}
+		}
+		catch (IOException ex) {
+			logger.warn("Application not reachable at ${reloadUrl.get()} (${ex.message}); is it running with reload.trigger.mode=api?")
+		}
+		finally {
+			connection.disconnect()
+		}
+	}
+}
