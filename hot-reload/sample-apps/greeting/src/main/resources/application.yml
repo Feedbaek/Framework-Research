@@ -10,7 +10,7 @@ reload:
   parent-packages: [com.example.greeting.shared]
   # classpath, base-packages는 생략하면 @SpringBootApplication 클래스 기준으로 정해진다.
   trigger:
-    mode: api              # watch: 파일 변경 감지 | api: POST /_reload 호출 시 | both
+    mode: watch              # watch: 파일 변경 감지 | api: POST /_reload 호출 시 | both
     api-path: /_reload       # mode가 api/both일 때. 인증이 없으므로 개발 환경에서만 켠다
   poll-interval: 1s
   quiet-period: 400ms

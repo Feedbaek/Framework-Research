@@ -21,11 +21,12 @@ sample-apps/
 |---|---|---|---|
 | 부모 | `reload.parent-packages`에 지정한 패키지 | 부모 클래스로더 (JVM 수명 동안 1번) | 부모 |
 | 부모 | `@SpringBootApplication`(`@SpringBootConfiguration`) 클래스와 그 중첩 클래스 | 부모 | 부모 |
-| 부모 | 엔진 패키지 `com.example.reload` | 부모 | 부모 |
 | 자식 | 그 밖의 애플리케이션 클래스 | 세대마다 새 클래스로더 | 자식 |
 
 - 부모와 자식이 같은 출력 디렉터리(`build/classes/java/main`)를 본다. 세대별 클래스로더(`GenerationClassLoader`)는 기본적으로 child-first이고, 부모 소유 클래스만 부모에 먼저 위임한다. 그래서 공유 타입은 부모와 자식이 같은 `Class`를 본다.
-- 부모의 컴포넌트 스캔은 자식 클래스패스에 있는 자식 소유 클래스를 제외한다(`TypeExcludeFilter`). 자식은 부모 소유 클래스와 `@SpringBootApplication` 클래스를 제외하고 스캔한다.
+- 컴포넌트 스캔은 `ReloadLayout.isChildComponent` 하나로 나눈다. 자식 클래스패스 디렉터리 안에 있고, 부모 소유가 아니고, `@SpringBootApplication` 클래스가 아닌 클래스만 자식이 등록하고, 부모 스캔은 그 클래스를 제외한다(`TypeExcludeFilter`).
+- 엔진은 jar로 부모 클래스패스에만 둔다. 자식 클래스패스에 없으므로 child-first 로딩에서도 부모에서 로드된다. `reload.classpath`에 엔진 jar나 엔진 클래스가 든 디렉터리를 넣으면 엔진 타입이 세대마다 따로 로드되어 주입·캐스팅이 실패한다. 시작할 때 자식 클래스패스에서 엔진 클래스가 보이면 경고한다.
+- 라이브러리 jar 등 자식 클래스패스 밖의 클래스는 스캔 패키지가 겹쳐도(예: 사내 공통 라이브러리 `com.example.*`) 부모에만 등록된다. 그 jar의 `@AutoConfiguration`과 Spring Boot 기본 auto-configuration도 부모에만 있다.
 - 부모 소유 클래스 파일이 바뀌면 재로딩하지 않고 "재시작 필요" 경고를 남긴다.
 - 시작할 때 부모 소유 클래스가 자식 소유 클래스를 참조하는지 검사해 경고한다(아래 제약 참고).
 
@@ -43,6 +44,33 @@ sample-apps/
 | `@Async`, `@Scheduled`, 메서드 검증 | 켜지 않는다. 필요하면 자식 패키지의 설정 클래스에 `@Enable*`을 선언한다 |
 
 부모의 `Advisor` bean(트랜잭션·캐시 advisor, 사용자 정의 advisor)을 자식 bean에 적용하면 메서드별 메타데이터 캐시가 부모 쪽 인스턴스에 쌓여 이전 세대의 클래스로더가 수거되지 않는다(테스트로 확인). 그래서 자식은 자기 context에 정의된 advisor만 쓴다. 애플리케이션이 자식에 `@EnableAspectJAutoProxy`를 직접 선언해도 엔진의 creator로 바뀐다.
+
+### 설정 배치 규칙
+
+**인프라 설정은 부모에 두고, Advisor·BeanPostProcessor로 동작하는 `@Enable*`만 자식에 둔다.**
+
+| 부모 (애플리케이션 클래스 또는 `reload.parent-packages`) | 자식 (재로딩 대상 패키지의 설정 클래스) |
+|---|---|
+| `@EnableCaching`, `TransactionManager`, `DataSource`, `CacheManager` (엔진이 자식에 트랜잭션·캐시를 다시 켠다) | `@EnableAsync`, `@EnableScheduling`, `@EnableConfigurationProperties` |
+| Boot customizer (`Jackson2ObjectMapperBuilderCustomizer`, `WebServerFactoryCustomizer` 등) | `@EnableMethodSecurity`, `@EnableRetry` |
+| `Filter`, `FilterRegistrationBean` 등 서블릿 컴포넌트, `SecurityFilterChain` | `@EnableKafka`, `@EnableRabbit`, `@EnableJms` |
+| 공통 관심사 `@Aspect`, 인프라 `@Bean` (클라이언트, 공용 bean) | `Advisor`·`BeanPostProcessor` bean (`@Bean` 또는 `@Component`) |
+
+이유: 자식의 인프라 설정은 부모 auto-configuration과 서블릿 컨테이너가 보지 못하고, 부모의 Advisor·BeanPostProcessor는 자식 bean을 처리하지 않는다. 어기면 오류 없이 기능이 빠진다(`docs/reload-aop-proxy-risks.md` 8~10장).
+
+엔진이 이 규칙을 검사해 경고한다(`ConfigurationPlacementChecker`, `reload.placement-check.enabled=false`로 끈다).
+
+- **부모 쪽** (첫 세대를 만들 때 한 번): 부모에 선언되어 자식 bean에는 적용되지 않는 `@EnableAsync`, `@EnableScheduling`, `Advisor` bean. 엔진이 자식에 다시 켜는 트랜잭션·캐시 advisor는 제외한다.
+- **자식 쪽** (위반 목록이 바뀐 세대마다): 자식 `@Configuration`의 허용되지 않은 `@Enable*`·`@Import`, Advisor·BeanPostProcessor가 아닌 `@Bean` 메서드, 자식에 정의된 인프라 bean(Filter, 서블릿 리스너·초기화 bean, Boot customizer, `SecurityFilterChain`, `CacheManager`, `TransactionManager`, `DataSource`, runner, `HttpMessageConverter`).
+
+```
+WARN ... Configuration placement rule: infrastructure configuration belongs in the parent; ... Violations in generation 1:
+  com.example.app.config.AppConfig @EnableTransactionManagement: define the TransactionManager in the parent; ...
+  com.example.app.config.AppConfig#indent() [Jackson2ObjectMapperBuilderCustomizer] is not applied to the parent ObjectMapper ...
+  com.example.app.web.HeaderFilter [Filter] is not registered with the servlet container ...
+```
+
+사내 라이브러리의 Advisor·BeanPostProcessor 기반 `@Enable*`은 `reload.placement-check.allowed-child-annotations`에 추가한다. `WebMvcConfigurer`를 구현한 자식 설정(인터셉터, CORS 등)은 `@Bean` 메서드나 `@Enable*`이 없으면 경고하지 않는다. 부모에는 MVC가 없고 자식 MVC가 부모·자식의 `WebMvcConfigurer`를 모두 적용하므로 자식에 둬도 동작한다.
 
 ## 엔진 (`reload`)
 
@@ -74,6 +102,9 @@ reload:
   quiet-period: 400ms              # poll-interval보다 짧아야 한다
   exclude-patterns: ["**/*.log"]   # 변경으로 치지 않을 패턴
   drain-timeout: 30s
+  placement-check:
+    enabled: true                  # 설정 배치 규칙 위반 경고 (위 "설정 배치 규칙")
+    allowed-child-annotations: []  # 자식 설정에 추가로 허용할 Advisor·BeanPostProcessor 기반 @Enable*
 ```
 
 `classpath`의 jar 항목은 로드는 되지만 감시하지 않는다(디렉터리만 감시).
@@ -128,7 +159,7 @@ com.example.reload
 | `generation` | `Generation` | 클래스로더·context·dispatcher 한 벌. 진행 중 요청 수를 세고 retire 뒤 dispose |
 | `generation` | `GenerationClassLoader` | `RestartClassLoader` + 부모 소유 클래스 parent-first 위임 |
 | `generation` | `GenerationApplicationContext` | 자식 context. 스캔에서 부모 소유·애플리케이션 클래스 제외 |
-| `generation` | `GenerationCacheCleaner` | dispose 뒤 Introspector/Spring/Jackson 캐시 정리 |
+| `generation` | `GenerationCacheCleaner` | dispose 뒤 Introspector/Spring/Jackson 캐시와 공개 API가 없는 Spring·Spring Security 내부 정적 캐시 정리 |
 | `generation` | `ReloadingDispatcherServlet` | 요청마다 현재 세대를 acquire하고 위임. 세대가 없으면 `503` + `Retry-After: 1` |
 | `generation` | `ReloadTriggerServlet`, `ReloadResult` | 재로딩 API (`POST`: 재로딩, `GET`: 상태), 재로딩 결과 |
 | `child` | `ChildInfrastructureConfiguration`, `ChildAspectJAutoProxyCreator` | 자식 AOP·트랜잭션·캐시 인프라, 부모 `Advisor` bean 차단 |
@@ -136,6 +167,7 @@ com.example.reload
 | `layout` | `ReloadLayout`, `ClassOwnership` | 자식 클래스패스와 클래스 소유권 결정 |
 | `layout` | `ReloadParentTypeExcludeFilter` | 부모 스캔에서 자식 소유 클래스 제외 |
 | `layout` | `BoundaryChecker` | 부모 소유 클래스 → 자식 소유 클래스 참조 검사 |
+| `layout` | `ConfigurationPlacementChecker` | 설정 배치 규칙 검사 (부모에만 있는 Advisor·BPP 기능, 자식의 인프라 설정) |
 | `watch` | `ClassPathChangeWatcher` | 변경 감지. 자식 소유 변경은 재로딩, 부모 소유 변경은 재시작 경고 |
 
 ## 소비자 샘플 (`sample-apps/greeting`)
@@ -192,6 +224,7 @@ curl localhost:8080/hello
 - **서드파티 의존성은 부모 클래스로더에 있다.** 자식 클래스로더에 전용 jar를 올리는 기능은 없다.
 - **부모 bean은 자식 객체를 붙잡지 않는다.** 부모 bean의 필드·캐시·리스너 목록에 자식 클래스의 인스턴스, `Class`, 람다를 저장하면 이전 세대가 수거되지 않는다. 부모 `CacheManager`에 자식 클래스 인스턴스를 값으로 캐시하는 것도 같다(검증하지 않음).
 - **부모의 `Advisor` bean은 자식에 적용되지 않는다.** 자식 bean에 적용할 공통 관심사는 `@Aspect`로 만들거나 자식 패키지에 둔다.
+- **인프라 설정은 부모에, Advisor·BeanPostProcessor 기반 `@Enable*`만 자식에 둔다.** 위 "설정 배치 규칙" 참고. 엔진이 시작할 때와 세대가 뜰 때 위반을 경고한다.
 - **JPA 엔티티·Spring Data 리포지토리**는 부모의 `EntityManagerFactory`가 다루므로 부모 소유 패키지에 두어야 하고 재로딩되지 않는다(이 샘플에는 없음, 검증하지 않음).
 - 자식 context에는 Spring Boot auto-configuration이 적용되지 않는다. 환경(프로퍼티)은 부모 것이 merge되고, `@ConfigurationProperties`는 쓸 수 있다.
 
@@ -207,6 +240,12 @@ curl localhost:8080/hello
 
 - `HotReloadIntegrationTest`: `javax.tools.JavaCompiler`로 컨트롤러 v1/v2/v3를 컴파일해 배포하면서 교체, 부모 bean 공유, 실패 격리, drain, 20회 교체 후 클래스로더 수거, 부모에 MVC 인프라 없음을 확인한다.
 - `AopLeakWith*Test`: 부모에 트랜잭션 매니저, `@EnableCaching`, `@Aspect`, 사용자 정의 `Advisor`가 있을 때 자식 AOP가 동작하는지, 20회 교체 후 이전 클래스로더가 모두 수거되는지 확인한다. 실패하면 `LeakDiagnostics`가 부모 쪽에서 자식 클래스를 붙잡은 `Map`을 경로와 함께 보여 준다.
+- `*ScenarioTest`: 일반 웹 앱 기능(AOP, `@Async`/`@Scheduled`, 이벤트, 세션·스코프, 캐시, 필터, 보안, actuator 등)이 재로딩에서도 일반 Boot 앱처럼 동작하는지 확인한다. 현재 엔진에서 실패하는 시나리오는 `@KnownIssue`로 표시해 기본 `test`에서 빼고 `./gradlew :reload:knownIssueTest`로 따로 돌린다. 결과는 `docs/reload-aop-proxy-risks.md` 8장.
+- `PureJavaParentScenarioTest`: 부모 패키지에 순수 자바 코드만 두는 배치. `ConsumerApp`이 애플리케이션 클래스와 부모·자식 코드를 한 출력 디렉터리에 컴파일하고 부모 클래스로더도 그 디렉터리를 보게 해서 실제 소비자 앱과 같은 배치로 띄운다. 결과는 같은 문서 9장.
+- `LayoutScenarioTest`: 부모 `@Component` + 자식 AOP·설정 배치, 권장 배치(부모 인프라 + 자식 컨트롤러·서비스), Advisor 위치별 적용 여부를 `ConsumerApp`으로 비교한다. 결과는 같은 문서 10장.
+- `LibraryScanScenarioTest`: 스캔 패키지와 겹치는 라이브러리 클래스(`@Component`, `@AutoConfiguration`, 자식 클래스패스 밖)가 부모에만 등록되고 자식 세대에는 등록되지 않는지, 자식에 Spring Boot auto-configuration이 없는지 확인한다.
+- `ConfigurationPlacementCheckerTest`, `ConfigurationPlacementScenarioTest`: 설정 배치 규칙 검사. 허용·위반 판정(단위 테스트)과 실제 소비자 앱 배치에서의 경고, 변경 시에만 다시 경고, 끄기 설정을 확인한다.
+- `GenerationCacheCleanerTest`: 공개 clear API가 없어 리플렉션으로 비우는 Spring·Spring Security 내부 캐시 필드가 있는지, 비워지는지 확인한다(Spring을 올려 필드 이름이 바뀌면 여기서 실패).
 - `BoundaryCheckerTest`: 필드 타입, 메서드 시그니처, 애플리케이션 클래스에서의 자식 참조를 찾는지, 소유권 규칙이 맞는지 확인한다.
 - `ReloadApiIntegrationTest`: `api` 모드에서 파일 변경만으로는 재로딩되지 않고, `POST`로 재로딩되며, 실패하면 500과 원인을 돌려주고 기존 세대가 유지되는지, `GET` 상태 조회와 405 처리를 확인한다. `HotReloadIntegrationTest`는 기본(`watch`) 모드에 API가 없는지도 확인한다.
 - `OnReloadApiConditionTest`: `reload.trigger.mode` 값별 API 등록 여부.

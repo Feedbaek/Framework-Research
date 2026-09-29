@@ -59,7 +59,6 @@ class BoundaryCheckerTest {
 		assertThat(OWNERSHIP.isParentOwned("com.example.shared.Registry$Entry")).isTrue();
 		assertThat(OWNERSHIP.isParentOwned("com.example.DemoApplication")).isTrue();
 		assertThat(OWNERSHIP.isParentOwned("com.example.DemoApplication$$SpringCGLIB$$0")).isTrue();
-		assertThat(OWNERSHIP.isParentOwned("com.example.reload.generation.GenerationManager")).isTrue();
 		assertThat(OWNERSHIP.isParentOwned("com.example.sharedstuff.Other")).isFalse();
 		assertThat(OWNERSHIP.isParentOwned("com.example.web.Widget")).isFalse();
 		assertThat(OWNERSHIP.isParentOwned("com.example.DemoApplicationHelper")).isFalse();

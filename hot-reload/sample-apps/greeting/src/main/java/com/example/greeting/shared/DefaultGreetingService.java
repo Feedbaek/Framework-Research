@@ -11,10 +11,6 @@ import org.springframework.stereotype.Service;
 @Service
 public class DefaultGreetingService implements GreetingService {
 
-	public DefaultGreetingService() {
-		System.out.println("!!!!!!!!!!!!!!! DefaultGreetingService() " + this.getClass().getClassLoader());
-	}
-
 	@Override
 	public String greet(String name) {
 		return "Hello, " + name + "!";

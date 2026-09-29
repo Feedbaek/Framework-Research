@@ -9,6 +9,10 @@ java {
 	withSourcesJar()
 }
 
+configurations {
+	actuatorScenario
+}
+
 dependencies {
 	def bom = platform(rootProject.ext.springBootBom)
 
@@ -33,7 +37,41 @@ dependencies {
 	// AOP 누수 테스트: 부모 aspect, 트랜잭션 advisor
 	testImplementation 'org.springframework.boot:spring-boot-starter-aop'
 	testImplementation 'org.springframework:spring-tx'
+	// 일반 웹 애플리케이션 시나리오 테스트(*ScenarioTest). 보안 auto-configuration은
+	// src/test/resources/application.properties에서 기본으로 꺼 두고, 보안 시나리오만 다시 켠다.
+	testImplementation 'org.springframework.boot:spring-boot-starter-security'
+	testImplementation 'org.springframework.boot:spring-boot-starter-validation'
+	testImplementation 'io.micrometer:micrometer-core'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+	// ActuatorScenarioTest가 별도 클래스로더로 올리는 jar. actuator를 테스트 클래스패스에 두면 모든 테스트
+	// 애플리케이션에 actuator가 켜지고, 현재 엔진에서는 부모 context가 뜨지 못한다.
+	actuatorScenario bom
+	actuatorScenario 'org.springframework.boot:spring-boot-starter-actuator'
+}
+
+tasks.withType(Test).configureEach {
+	def actuatorJars = configurations.actuatorScenario.minus(configurations.testRuntimeClasspath)
+	inputs.files(actuatorJars).withPropertyName('actuatorScenarioJars')
+	jvmArgumentProviders.add({ ['-Dactuator.scenario.classpath=' + actuatorJars.asPath] } as CommandLineArgumentProvider)
+}
+
+// @KnownIssue(태그 known-issue): 일반 Spring Boot 앱이라면 통과해야 하지만 현재 엔진에서는 실패하는 시나리오.
+// 기본 test에서는 빼고, knownIssueTest로 따로 돌린다(실패가 정상).
+tasks.named('test', Test) {
+	useJUnitPlatform {
+		excludeTags 'known-issue'
+	}
+}
+
+tasks.register('knownIssueTest', Test) {
+	description = 'Runs scenarios that are known to fail with the current reload engine (@KnownIssue).'
+	group = 'verification'
+	testClassesDirs = sourceSets.test.output.classesDirs
+	classpath = sourceSets.test.runtimeClasspath
+	useJUnitPlatform {
+		includeTags 'known-issue'
+	}
 }
 
 publishing {

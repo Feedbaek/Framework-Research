@@ -36,6 +36,7 @@ import com.example.reload.ReloadProperties;
 import com.example.reload.child.ChildInfrastructureConfiguration;
 import com.example.reload.child.ChildWebMvcConfig;
 import com.example.reload.layout.BoundaryChecker;
+import com.example.reload.layout.ConfigurationPlacementChecker;
 import com.example.reload.layout.ReloadLayout;
 import com.example.reload.watch.ClassPathChangeWatcher;
 
@@ -45,6 +46,10 @@ import com.example.reload.watch.ClassPathChangeWatcher;
 public class GenerationManager {
 
 	private static final Log logger = LogFactory.getLog(GenerationManager.class);
+
+	private static final String PLACEMENT_RULE = "Configuration placement rule: infrastructure configuration belongs "
+			+ "in the parent; only Advisor or BeanPostProcessor based @Enable* annotations belong in the child "
+			+ "(set reload.placement-check.enabled=false to disable).";
 
 	private final ReloadProperties properties;
 
@@ -74,6 +79,11 @@ public class GenerationManager {
 	private volatile List<String> basePackages;
 
 	private boolean classpathChecked;
+
+	/**
+	 * 마지막으로 경고한 자식 설정 배치 위반(문자열).
+	 */
+	private List<String> childPlacementViolations = List.of();
 
 	public GenerationManager(ReloadProperties properties, ReloadLayout layout, ConfigurableApplicationContext parentContext,
 			Consumer<ClassLoader> cacheCleaner) {
@@ -171,6 +181,7 @@ public class GenerationManager {
 		int previousId = currentGenerationId();
 		if (!this.classpathChecked) {
 			checkClasspath();
+			checkParentPlacement();
 			this.classpathChecked = true;
 		}
 		int id = this.generationIds.incrementAndGet();
@@ -201,6 +212,7 @@ public class GenerationManager {
 			generation.dispose();
 			return new ReloadResult(false, previousId, previousId, durationMillis, summarize(failure));
 		}
+		checkChildPlacement(id, generation.context(), loader);
 		Generation previous = this.current.getAndSet(generation);
 		logger.info("Generation " + id + " started in " + durationMillis + " ms"
 				+ ((previous != null) ? " (replacing generation " + previous.id() + ")" : ""));
@@ -230,7 +242,7 @@ public class GenerationManager {
 	}
 
 	private AnnotationConfigWebApplicationContext createContext(int id, ClassLoader loader) {
-		AnnotationConfigWebApplicationContext context = new GenerationApplicationContext(this.layout.ownership());
+		AnnotationConfigWebApplicationContext context = new GenerationApplicationContext(this.layout);
 		context.setId(this.parentContext.getId() + ":generation-" + id);
 		context.setDisplayName("Reload generation " + id);
 		context.setParent(this.parentContext);
@@ -295,6 +307,56 @@ public class GenerationManager {
 				.append(childClasses));
 			logger.warn(message);
 		}
+	}
+
+	/**
+	 * 부모에 선언되어 자식 bean에는 적용되지 않는 기능({@code @EnableAsync}, Advisor bean 등)을 경고한다.
+	 */
+	private void checkParentPlacement() {
+		if (!this.properties.getPlacementCheck().isEnabled()) {
+			return;
+		}
+		try {
+			List<String> findings = ConfigurationPlacementChecker
+				.findParentOnlyFeatures(this.parentContext.getBeanFactory());
+			if (!findings.isEmpty()) {
+				logger.warn(PLACEMENT_RULE + " Parent configuration that does not apply to generation beans:\n  "
+						+ String.join("\n  ", findings));
+			}
+		}
+		catch (RuntimeException | LinkageError ex) {
+			logger.debug("Configuration placement check of the parent failed", ex);
+		}
+	}
+
+	/**
+	 * 자식 세대의 설정 배치 규칙 위반을 경고한다. 같은 위반을 세대마다 반복하지 않도록 목록이 바뀔 때만 남긴다.
+	 * 위반은 문자열로만 보관한다(자식 클래스를 붙잡지 않도록).
+	 */
+	private void checkChildPlacement(int id, AnnotationConfigWebApplicationContext context, ClassLoader loader) {
+		ReloadProperties.PlacementCheck placementCheck = this.properties.getPlacementCheck();
+		if (!placementCheck.isEnabled()) {
+			return;
+		}
+		List<String> violations;
+		try {
+			violations = ConfigurationPlacementChecker.findChildViolations(context.getBeanFactory(),
+					(type) -> type.getClassLoader() == loader, placementCheck.getAllowedChildAnnotations());
+		}
+		catch (RuntimeException | LinkageError ex) {
+			logger.debug("Configuration placement check of generation " + id + " failed", ex);
+			return;
+		}
+		if (violations.equals(this.childPlacementViolations)) {
+			return;
+		}
+		if (violations.isEmpty()) {
+			logger.info("Configuration placement violations resolved in generation " + id);
+		}
+		else {
+			logger.warn(PLACEMENT_RULE + " Violations in generation " + id + ":\n  " + String.join("\n  ", violations));
+		}
+		this.childPlacementViolations = violations;
 	}
 
 	@PreDestroy

@@ -8,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
@@ -77,6 +78,10 @@ final class ControllerCompiler {
 		this.classesDirectory = classesDirectory;
 	}
 
+	Path classesDirectory() {
+		return this.classesDirectory;
+	}
+
 	/**
 	 * 정상 동작하는 버전을 배포한다.
 	 */
@@ -117,6 +122,45 @@ final class ControllerCompiler {
 		}
 		catch (IOException ex) {
 			throw new UncheckedIOException(ex);
+		}
+	}
+
+	/**
+	 * 클래스 디렉터리를 비우고 주어진 소스와 리소스만 배포한다. 이전 배포에서 남은 클래스가 다음 세대에
+	 * 섞이지 않게 한다. 감시(watch) 모드에서는 비우는 도중의 상태가 감지될 수 있으므로 {@code api} 모드에서
+	 * 직접 재로딩할 때 쓴다.
+	 * @param label 임시 디렉터리 이름에 쓰는 표시
+	 * @param sources 단순 클래스 이름 → 소스({@code com.example.app} 패키지)
+	 * @param resources 클래스 디렉터리 기준 상대 경로 → 내용
+	 */
+	void replaceSources(String label, Map<String, String> sources, Map<String, String> resources) {
+		try {
+			deleteContents(this.classesDirectory);
+			Files.createDirectories(this.classesDirectory);
+			if (!sources.isEmpty()) {
+				deploySources(label, sources);
+			}
+			for (Map.Entry<String, String> resource : resources.entrySet()) {
+				Path target = this.classesDirectory.resolve(resource.getKey());
+				Files.createDirectories(target.getParent());
+				Files.writeString(target, resource.getValue(), StandardCharsets.UTF_8);
+			}
+		}
+		catch (IOException ex) {
+			throw new UncheckedIOException(ex);
+		}
+	}
+
+	private static void deleteContents(Path directory) throws IOException {
+		if (!Files.exists(directory)) {
+			return;
+		}
+		List<Path> paths;
+		try (Stream<Path> stream = Files.walk(directory)) {
+			paths = stream.filter((path) -> !path.equals(directory)).sorted(Comparator.reverseOrder()).toList();
+		}
+		for (Path path : paths) {
+			Files.delete(path);
 		}
 	}
 

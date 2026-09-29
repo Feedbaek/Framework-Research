@@ -31,7 +31,7 @@ public class ReloadProperties {
 	/**
 	 * 부모 클래스로더가 로드하고 부모 context에 등록되는 패키지. 부모·자식이 공유하는 타입과 부모 bean을
 	 * 둔다. 나머지 애플리케이션 클래스는 기본적으로 자식(재로딩 대상)이다. {@code @SpringBootApplication}
-	 * 클래스와 엔진 패키지는 항상 부모 소유다.
+	 * 클래스는 항상 부모 소유다.
 	 */
 	private List<String> parentPackages = new ArrayList<>();
 
@@ -60,8 +60,17 @@ public class ReloadProperties {
 	 */
 	private final Trigger trigger = new Trigger();
 
+	/**
+	 * 설정 배치 규칙 검사.
+	 */
+	private final PlacementCheck placementCheck = new PlacementCheck();
+
 	public Trigger getTrigger() {
 		return this.trigger;
+	}
+
+	public PlacementCheck getPlacementCheck() {
+		return this.placementCheck;
 	}
 
 	public boolean isEnabled() {
@@ -158,6 +167,40 @@ public class ReloadProperties {
 
 		public void setApiPath(String apiPath) {
 			this.apiPath = apiPath;
+		}
+
+	}
+
+	/**
+	 * 설정 배치 규칙(인프라 설정은 부모, Advisor·BeanPostProcessor 기반 {@code @Enable*}만 자식) 검사 설정.
+	 */
+	public static class PlacementCheck {
+
+		/**
+		 * 설정 배치 규칙 위반을 경고할지. 부모 쪽은 첫 세대를 만들 때, 자식 쪽은 위반 목록이 바뀐 세대마다 경고한다.
+		 */
+		private boolean enabled = true;
+
+		/**
+		 * 자식 설정에 추가로 허용할 애너테이션의 완전한 클래스 이름. Advisor나 BeanPostProcessor를 등록하는
+		 * {@code @Enable*}(사내 라이브러리 등)만 넣는다.
+		 */
+		private List<String> allowedChildAnnotations = new ArrayList<>();
+
+		public boolean isEnabled() {
+			return this.enabled;
+		}
+
+		public void setEnabled(boolean enabled) {
+			this.enabled = enabled;
+		}
+
+		public List<String> getAllowedChildAnnotations() {
+			return this.allowedChildAnnotations;
+		}
+
+		public void setAllowedChildAnnotations(List<String> allowedChildAnnotations) {
+			this.allowedChildAnnotations = allowedChildAnnotations;
 		}
 
 	}
