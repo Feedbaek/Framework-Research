@@ -494,8 +494,8 @@ class PureJavaParentScenarioTest {
 			// 하네스는 출력 디렉터리를 통째로 다시 쓰므로 목록에는 다른 부모 소유 클래스도 함께 나온다.
 			AbstractReloadScenarioTest.await("restart warning", () -> output.getOut()
 				.lines()
-				.anyMatch((line) -> line.contains("Parent-owned classes changed; restart the application")
-						&& line.contains("com.example.app.domain.PriceCalculator")));
+				.anyMatch((line) -> line.contains("Change action=restart-required")
+						&& line.contains("PriceCalculator.class")));
 			assertThat(app.getOk("/price?amount=100")).as("parent logic is still the old version")
 				.isEqualTo("110:PAID");
 		}
@@ -506,7 +506,6 @@ class PureJavaParentScenarioTest {
 	 * 재시작이 필요하다는 것을 알려야 한다. 그렇지 않으면 재로딩은 성공했는데 옛 로직이 도는 상태가 된다.
 	 */
 	@Test
-	@KnownIssue("api 모드의 재로딩은 부모 소유 클래스 변경을 검사하지 않아 경고 없이 reloaded=true를 돌려준다")
 	void reloadApiWarnsThatParentOwnedChangesNeedRestart(CapturedOutput output) throws Exception {
 		try (ConsumerApp app = ConsumerApp.start(sources(MONEY, ORDER_STATUS, PRICE_CALCULATOR_TEMPLATE.formatted(10),
 				PRICE_CONTROLLER))) {
@@ -514,7 +513,7 @@ class PureJavaParentScenarioTest {
 
 			ReloadResult result = app.reload();
 
-			assertThat(output.getOut()).contains("restart");
+			assertThat(result.action()).isEqualTo("restart-required");
 			assertThat(result.reloaded()).as("reload reported as applied although parent code is stale").isFalse();
 		}
 	}

@@ -82,3 +82,14 @@ publishing {
 		}
 	}
 }
+
+// 선택적 ProObject 22 계약 검증. 로컬에 설치된 런타임 아티팩트가 있는 개발 환경에서만 켠다.
+if (providers.gradleProperty('proobjectCompatibility').isPresent()) {
+	repositories { mavenLocal() }
+	sourceSets.test.java.srcDir 'src/proobjectTest/java'
+	dependencies {
+		testImplementation 'com.tmax.proobject:proobject-spring-boot-autoconfigure:22.0.0'
+		testImplementation 'com.tmax.proobject:proobject-service:22.0.0'
+		testRuntimeOnly 'com.tmax.proobject:proobject-logger-logback:22.0.0'
+	}
+}

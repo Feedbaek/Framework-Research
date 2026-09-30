@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.converter.ByteArrayHttpMessageConverter;
 import org.springframework.http.converter.HttpMessageConverter;
 import org.springframework.http.converter.ResourceHttpMessageConverter;
@@ -15,7 +16,6 @@ import org.springframework.http.converter.ResourceRegionHttpMessageConverter;
 import org.springframework.http.converter.StringHttpMessageConverter;
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.http.converter.support.AllEncompassingFormHttpMessageConverter;
-import org.springframework.web.servlet.config.annotation.EnableWebMvc;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 /**
@@ -25,7 +25,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  * 컴포넌트 스캔하면 안 된다. 부모에 등록되면 부모에도 MVC가 켜진다.
  */
 @Configuration(proxyBeanMethods = false)
-@EnableWebMvc
+@Import(ChildMvcConfiguration.class)
 @EnableConfigurationProperties
 public class ChildWebMvcConfig implements WebMvcConfigurer {
 

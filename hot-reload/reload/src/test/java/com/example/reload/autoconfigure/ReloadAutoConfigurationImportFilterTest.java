@@ -15,11 +15,18 @@ class ReloadAutoConfigurationImportFilterTest {
 			"org.springframework.boot.autoconfigure.jackson.JacksonAutoConfiguration", null };
 
 	@Test
-	void excludesParentMvcAutoConfigurationsByDefault() {
+	void excludesParentMvcOnlyForExplicitBusinessPackages() {
 		ReloadAutoConfigurationImportFilter filter = new ReloadAutoConfigurationImportFilter();
-		filter.setEnvironment(new MockEnvironment());
+		filter.setEnvironment(new MockEnvironment().withProperty("reload.business-packages", "com.example.app"));
 
 		assertThat(filter.match(CANDIDATES, null)).containsExactly(false, false, false, true, true);
+	}
+
+	@Test
+	void ordinaryBootIsTheDefaultWithoutBusinessPackages() {
+		ReloadAutoConfigurationImportFilter filter = new ReloadAutoConfigurationImportFilter();
+		filter.setEnvironment(new MockEnvironment());
+		assertThat(filter.match(CANDIDATES, null)).containsExactly(true, true, true, true, true);
 	}
 
 	@Test

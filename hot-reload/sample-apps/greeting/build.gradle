@@ -5,14 +5,39 @@ plugins {
 
 // 재로딩 엔진(reload)을 사용하는 소비자 샘플. 평범한 Spring Boot 애플리케이션이다.
 //
-// 애플리케이션 클래스는 기본적으로 재로딩 대상(자식)이고, application.yml의 reload.parent-packages에
-// 지정한 패키지와 @SpringBootApplication 클래스만 부모 소유다. reload.enabled=false이면 일반 앱으로 동작한다.
+// application.yml의 reload.business-packages만 자식이다. 인프라는 부모에 유지하며 변경 시 전체 재시작한다.
+// reload.enabled=false이면 일반 앱으로 동작한다.
 dependencies {
 	implementation project(':reload')
 	implementation 'org.springframework.boot:spring-boot-starter-web'
 
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// 감독자가 매번 bootRun을 새로 실행하므로 의존성/빌드 설정도 다시 해석한다.
+tasks.register('hotReloadRun', JavaExec) {
+	group = 'application'
+	description = 'Runs bootRun under a supervisor for business reload and full process restart.'
+	dependsOn ':reload:classes'
+	classpath = project(':reload').sourceSets.main.output
+	mainClass = 'com.example.reload.restart.RestartLauncher'
+	workingDir = rootProject.projectDir
+	def wrapper = System.getProperty('os.name').toLowerCase().contains('windows') ? 'gradlew.bat' : './gradlew'
+	if (System.getProperty('os.name').toLowerCase().contains('windows')) {
+		args '--', 'cmd.exe', '/c', wrapper
+	}
+	else {
+		args '--', wrapper
+	}
+	args ':sample-apps:greeting:bootRun', '--console=plain', '--no-daemon'
+	if (providers.gradleProperty('appArgs').isPresent()) {
+		args '--args=' + providers.gradleProperty('appArgs').get()
+	}
+}
+
+tasks.named('bootRun') {
+	workingDir = rootProject.projectDir
 }
 
 // 컴파일이 끝난 뒤 실행 중인 애플리케이션의 재로딩 API를 호출한다(reload.trigger.mode=api 또는 both).
@@ -34,7 +59,7 @@ tasks.register('triggerReload') {
 			def stream = (status < 400) ? connection.inputStream : connection.errorStream
 			def body = (stream != null) ? stream.getText('UTF-8') : ''
 			if (status < 400) {
-				logger.lifecycle("Reloaded: ${body}")
+				logger.lifecycle("Reload action: ${body}")
 			}
 			else {
 				logger.warn("Reload failed (HTTP ${status}): ${body}")

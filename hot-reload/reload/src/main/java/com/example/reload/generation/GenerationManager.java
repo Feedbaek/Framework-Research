@@ -38,7 +38,9 @@ import com.example.reload.child.ChildWebMvcConfig;
 import com.example.reload.layout.BoundaryChecker;
 import com.example.reload.layout.ConfigurationPlacementChecker;
 import com.example.reload.layout.ReloadLayout;
-import com.example.reload.watch.ClassPathChangeWatcher;
+import com.example.reload.watch.ChangePlanner;
+import com.example.reload.watch.ChangePoller;
+import com.example.reload.restart.FullRestart;
 
 /**
  * 부모 context의 bean. 자식 세대를 만들고 교체하고 폐기한다.
@@ -74,7 +76,13 @@ public class GenerationManager {
 	 */
 	private final Set<Generation> draining = ConcurrentHashMap.newKeySet();
 
-	private volatile ClassPathChangeWatcher watcher;
+	private volatile ChangePoller watcher;
+
+	private final ChangePlanner changePlanner;
+	private ChangePlanner.Snapshot baseline;
+	private final FullRestart fullRestart;
+	private boolean stopped;
+	private final Set<String> knownBusinessClasses = new java.util.HashSet<>();
 
 	private volatile List<String> basePackages;
 
@@ -87,6 +95,14 @@ public class GenerationManager {
 
 	public GenerationManager(ReloadProperties properties, ReloadLayout layout, ConfigurableApplicationContext parentContext,
 			Consumer<ClassLoader> cacheCleaner) {
+		this(properties, layout, parentContext, cacheCleaner, new FullRestart() {
+			public boolean available() { return false; }
+			public void request() { throw new IllegalStateException("No full restart handler"); }
+		});
+	}
+
+	public GenerationManager(ReloadProperties properties, ReloadLayout layout, ConfigurableApplicationContext parentContext,
+			Consumer<ClassLoader> cacheCleaner, FullRestart fullRestart) {
 		Assert.isInstanceOf(WebApplicationContext.class, parentContext, "Parent context must be a web context");
 		this.properties = properties;
 		this.layout = layout;
@@ -95,6 +111,10 @@ public class GenerationManager {
 				: ClassUtils.getDefaultClassLoader();
 		this.cacheCleaner = cacheCleaner;
 		this.drainScheduler = createDrainScheduler(this.hostClassLoader);
+		this.changePlanner = new ChangePlanner(properties, layout);
+		this.baseline = this.changePlanner.snapshot();
+		this.fullRestart = fullRestart;
+		this.knownBusinessClasses.addAll(businessClasses(this.baseline));
 	}
 
 	private static ScheduledExecutorService createDrainScheduler(ClassLoader hostClassLoader) {
@@ -125,21 +145,24 @@ public class GenerationManager {
 		if (mode.isApi()) {
 			logger.info("Reload API available: POST " + this.properties.getTrigger().getApiPath());
 		}
-		reload();
+		if (this.properties.isHybrid() && !reload()) {
+			throw new IllegalStateException("Initial reload generation could not start; inspect the preceding error");
+		}
 	}
 
 	private void startWatching() {
-		List<Path> directories = this.layout.watchedDirectories();
-		if (directories.isEmpty()) {
-			logger.warn("No reload.classpath directories to watch; automatic reload is disabled");
+		this.watcher = new ChangePoller(this.changePlanner, this.baseline, this.properties.getPollInterval(),
+				this.properties.getQuietPeriod(), this.hostClassLoader, this::onStableChange);
+		logger.info("Watching application outputs and reload.watch-paths (mode="
+				+ (this.properties.isHybrid() ? "hybrid" : "full-restart") + ")");
+	}
+
+	private synchronized void onStableChange(ChangePlanner.Snapshot snapshot) {
+		if (this.stopped || this.changePlanner.plan(this.baseline, snapshot).action() == ChangePlanner.Action.NONE) {
 			return;
 		}
-		ClassPathChangeWatcher watcher = new ClassPathChangeWatcher(directories, this.properties.getPollInterval(),
-				this.properties.getQuietPeriod(), this.properties.getExcludePatterns(), this.hostClassLoader,
-				this.layout.ownership(), this::reload);
-		watcher.start();
-		this.watcher = watcher;
-		logger.info("Watching " + directories + " for changes");
+		ReloadResult result = reloadWithResult();
+		logger.info("Change action=" + result.action() + ", reasons=" + result.reasons() + ", error=" + result.error());
 	}
 
 	/**
@@ -164,6 +187,35 @@ public class GenerationManager {
 		return this.failedReloads.get();
 	}
 
+	@FunctionalInterface
+	public interface GenerationOperation<T> {
+		T invoke(AnnotationConfigWebApplicationContext context) throws Throwable;
+	}
+
+	/** HTTP 외의 진입점도 요청 전체에 같은 세대를 고정한다. 중첩 호출은 현재 세대를 재사용한다. */
+	public <T> T withGeneration(GenerationOperation<T> operation) throws Throwable {
+		AnnotationConfigWebApplicationContext existing = GenerationScope.current();
+		if (existing != null && existing.getParent() == this.parentContext) {
+			return operation.invoke(existing);
+		}
+		for (int attempt = 0; attempt < 2; attempt++) {
+			Generation generation = this.current.get();
+			if (generation == null) { break; }
+			if (!generation.acquire()) { continue; }
+			Thread thread = Thread.currentThread();
+			ClassLoader previous = thread.getContextClassLoader();
+			thread.setContextClassLoader(generation.classLoader());
+			try (GenerationScope scope = GenerationScope.enter(generation.context())) {
+				return operation.invoke(generation.context());
+			}
+			finally {
+				thread.setContextClassLoader(previous);
+				generation.release();
+			}
+		}
+		throw new IllegalStateException("No active reload generation");
+	}
+
 	/**
 	 * 새 세대를 만들어 현재 세대와 교체한다. 실패하면 기존 세대를 그대로 둔다.
 	 * @return 교체에 성공하면 {@code true}
@@ -179,6 +231,32 @@ public class GenerationManager {
 	 */
 	public synchronized ReloadResult reloadWithResult() {
 		int previousId = currentGenerationId();
+		if (this.stopped) {
+			return new ReloadResult(false, previousId, previousId, 0, "Application is stopping");
+		}
+		ChangePlanner.Snapshot candidate;
+		try {
+			candidate = this.changePlanner.snapshot();
+		}
+		catch (RuntimeException ex) {
+			return new ReloadResult(false, previousId, previousId, 0, summarize(ex));
+		}
+		ChangePlanner.Plan plan = this.changePlanner.plan(this.baseline, candidate);
+		if (!this.properties.isHybrid() || plan.action() == ChangePlanner.Action.RESTART) {
+			if (!this.fullRestart.available()) {
+				return new ReloadResult(false, previousId, previousId, 0,
+						"Infrastructure changed. Start with RestartLauncher to enable full restart.",
+						"restart-required", plan.reasons());
+			}
+			this.fullRestart.request();
+			return new ReloadResult(false, previousId, previousId, 0, null, "restart-requested", plan.reasons());
+		}
+		return buildGeneration(candidate, plan.reasons());
+	}
+
+	/** 변경 정책과 분리된 세대 구성 단계. API/감시는 반드시 reloadWithResult를 통해 진입한다. */
+	synchronized ReloadResult buildGeneration(ChangePlanner.Snapshot candidate, List<String> reasons) {
+		int previousId = currentGenerationId();
 		if (!this.classpathChecked) {
 			checkClasspath();
 			checkParentPlacement();
@@ -186,8 +264,11 @@ public class GenerationManager {
 		}
 		int id = this.generationIds.incrementAndGet();
 		long startTime = System.nanoTime();
+		Set<String> present = businessClasses(candidate);
+		Set<String> deleted = new java.util.HashSet<>(this.knownBusinessClasses);
+		deleted.removeAll(present);
 		GenerationClassLoader loader = new GenerationClassLoader(this.hostClassLoader, this.layout.classpathUrls(),
-				this.layout.ownership());
+				this.layout.ownership(), deleted);
 		Generation generation = new Generation(id, loader, this.cacheCleaner);
 		Throwable failure = null;
 		Thread thread = Thread.currentThread();
@@ -198,6 +279,11 @@ public class GenerationManager {
 			generation.setContext(context);
 			context.refresh();
 			generation.setDispatcher(createDispatcher(id, context));
+			this.parentContext.getBeanProvider(GenerationIntegration.class).orderedStream()
+					.forEach((integration) -> integration.validate(context));
+			if (!candidate.equals(this.changePlanner.snapshot())) {
+				throw new IllegalStateException("Files changed while building the generation; retry after compilation finishes");
+			}
 		}
 		catch (Exception | LinkageError ex) {
 			failure = ex;
@@ -214,6 +300,8 @@ public class GenerationManager {
 		}
 		checkChildPlacement(id, generation.context(), loader);
 		Generation previous = this.current.getAndSet(generation);
+		this.baseline = candidate;
+		this.knownBusinessClasses.addAll(present);
 		logger.info("Generation " + id + " started in " + durationMillis + " ms"
 				+ ((previous != null) ? " (replacing generation " + previous.id() + ")" : ""));
 		if (previous != null) {
@@ -223,7 +311,13 @@ public class GenerationManager {
 			}
 		}
 		this.draining.removeIf(Generation::isDisposed);
-		return new ReloadResult(true, id, previousId, durationMillis, null);
+		return new ReloadResult(true, id, previousId, durationMillis, null, "reload", reasons);
+	}
+
+	private Set<String> businessClasses(ChangePlanner.Snapshot snapshot) {
+		return snapshot.files().values().stream().filter((entry) -> entry.className() != null)
+				.map(ChangePlanner.Entry::className).filter((name) -> !this.layout.ownership().isParentOwned(name))
+				.collect(java.util.stream.Collectors.toSet());
 	}
 
 	/**
@@ -241,6 +335,10 @@ public class GenerationManager {
 		return this.properties.getTrigger().getMode();
 	}
 
+	public String strategy() { return this.properties.isHybrid() ? "hybrid" : "full-restart"; }
+
+	public boolean restartAvailable() { return this.fullRestart.available(); }
+
 	private AnnotationConfigWebApplicationContext createContext(int id, ClassLoader loader) {
 		AnnotationConfigWebApplicationContext context = new GenerationApplicationContext(this.layout);
 		context.setId(this.parentContext.getId() + ":generation-" + id);
@@ -249,6 +347,8 @@ public class GenerationManager {
 		context.setClassLoader(loader);
 		context.setServletContext(servletContext());
 		context.register(ChildInfrastructureConfiguration.class, ChildWebMvcConfig.class);
+		this.parentContext.getBeanProvider(GenerationIntegration.class).orderedStream()
+				.forEach((integration) -> integration.configure(context));
 		List<String> basePackages = basePackages();
 		if (!basePackages.isEmpty()) {
 			context.scan(basePackages.toArray(String[]::new));
@@ -360,10 +460,11 @@ public class GenerationManager {
 	}
 
 	@PreDestroy
-	public void shutdown() {
-		ClassPathChangeWatcher watcher = this.watcher;
+	public synchronized void shutdown() {
+		this.stopped = true;
+		ChangePoller watcher = this.watcher;
 		if (watcher != null) {
-			watcher.stop();
+			watcher.close();
 			this.watcher = null;
 		}
 		Generation generation = this.current.getAndSet(null);

@@ -1,5 +1,7 @@
 # Hot Reload 프레임워크 프로젝트 생성 지시서
 
+> 초기 설계 기록이다. 현재의 업무 코드 선택적 재로딩·인프라 변경 시 JVM 재시작 정책은 [hybrid-reload-spec.md](hybrid-reload-spec.md)를 따른다.
+
 ## 목표
 
 Spring Boot 3.5.16 / Gradle 멀티 모듈 프로젝트를 만든다. 구조는 다음과 같다.

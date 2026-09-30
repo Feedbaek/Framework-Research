@@ -12,6 +12,15 @@ package com.example.reload.generation;
  * @param error 실패 원인 요약(성공하면 {@code null})
  */
 public record ReloadResult(boolean reloaded, int generation, int previousGeneration, long durationMillis,
-		String error) {
+		String error, String action, java.util.List<String> reasons) {
+
+	public ReloadResult {
+		reasons = java.util.List.copyOf(reasons);
+	}
+
+	public ReloadResult(boolean reloaded, int generation, int previousGeneration, long durationMillis, String error) {
+		this(reloaded, generation, previousGeneration, durationMillis, error, reloaded ? "reload" : "failed",
+				java.util.List.of());
+	}
 
 }

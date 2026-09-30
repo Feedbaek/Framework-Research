@@ -186,7 +186,8 @@ class ConfigurationPlacementScenarioTest {
 			assertThat(occurrences(output.getOut(), "Violations in generation")).isOne();
 
 			app.update(sources(CHILD_ASYNC_CONFIG));
-			app.reloadSuccessfully();
+			assertThat(app.reload().action()).isEqualTo("restart-required");
+			assertThat(GenerationFixtures.install(app.manager()).reloaded()).isTrue();
 
 			assertThat(output.getOut()).contains("Configuration placement violations resolved in generation 4");
 		}

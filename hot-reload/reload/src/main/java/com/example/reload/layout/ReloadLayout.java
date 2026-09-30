@@ -65,7 +65,7 @@ public final class ReloadLayout {
 					+ "classes fails. Keep the engine jar on the application classpath only.");
 		}
 		return new ReloadLayout(classpath,
-				new ClassOwnership(properties.getParentPackages(), applicationClassNames));
+				new ClassOwnership(properties.getParentPackages(), applicationClassNames, properties.getBusinessPackages()));
 	}
 
 	public List<Path> classpath() {

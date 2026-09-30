@@ -5,6 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import com.example.reload.restart.FullRestart;
+import com.example.reload.restart.SupervisedRestart;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication.Type;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -35,17 +38,24 @@ import com.example.reload.layout.ReloadLayout;
 public class ReloadAutoConfiguration {
 
 	@Bean
+	@ConditionalOnMissingBean(FullRestart.class)
+	FullRestart fullRestart(ConfigurableApplicationContext context) {
+		return new SupervisedRestart(context);
+	}
+
+	@Bean
 	GenerationManager generationManager(ReloadProperties properties, ConfigurableApplicationContext applicationContext,
-			ObjectProvider<ObjectMapper> objectMapper) {
+			ObjectProvider<ObjectMapper> objectMapper, FullRestart fullRestart) {
 		// 보통은 ReloadApplicationListener가 refresh 전에 등록해 둔다(부모 스캔 필터와 같은 인스턴스).
 		ReloadLayout layout = applicationContext.getBeanFactory().containsSingleton(ReloadLayout.BEAN_NAME)
 				? (ReloadLayout) applicationContext.getBeanFactory().getSingleton(ReloadLayout.BEAN_NAME)
 				: ReloadLayout.resolve(properties, applicationContext.getBeanFactory());
 		return new GenerationManager(properties, layout, applicationContext,
-				new GenerationCacheCleaner(objectMapper));
+				new GenerationCacheCleaner(objectMapper), fullRestart);
 	}
 
 	@Bean
+	@Conditional(OnHybridCondition.class)
 	ServletRegistrationBean<ReloadingDispatcherServlet> reloadingDispatcherServlet(
 			GenerationManager generationManager) {
 		ServletRegistrationBean<ReloadingDispatcherServlet> registration = new ServletRegistrationBean<>(

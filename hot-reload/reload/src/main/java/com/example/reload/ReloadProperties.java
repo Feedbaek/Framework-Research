@@ -29,11 +29,36 @@ public class ReloadProperties {
 	private List<String> basePackages = new ArrayList<>();
 
 	/**
-	 * 부모 클래스로더가 로드하고 부모 context에 등록되는 패키지. 부모·자식이 공유하는 타입과 부모 bean을
-	 * 둔다. 나머지 애플리케이션 클래스는 기본적으로 자식(재로딩 대상)이다. {@code @SpringBootApplication}
-	 * 클래스는 항상 부모 소유다.
+	 * business-packages 안에서도 부모에 유지할 공통 타입과 인프라 패키지. 업무 영역 밖의 클래스와
+	 * {@code @SpringBootApplication} 클래스는 항상 부모 소유다.
 	 */
 	private List<String> parentPackages = new ArrayList<>();
+
+	/** 명시적인 빠른 재로딩 영역. 비어 있으면 일반 Boot 구성 + 전체 재시작만 사용한다. */
+	private List<String> businessPackages = new ArrayList<>();
+
+	/** 클래스 출력 외에 감시할 리소스 디렉터리 또는 빌드 설정 파일. */
+	private List<String> watchPaths = new ArrayList<>();
+
+	public List<String> getBusinessPackages() {
+		return this.businessPackages;
+	}
+
+	public void setBusinessPackages(List<String> businessPackages) {
+		this.businessPackages = businessPackages;
+	}
+
+	public List<String> getWatchPaths() {
+		return this.watchPaths;
+	}
+
+	public void setWatchPaths(List<String> watchPaths) {
+		this.watchPaths = watchPaths;
+	}
+
+	public boolean isHybrid() {
+		return !this.businessPackages.isEmpty();
+	}
 
 	/**
 	 * 클래스패스 디렉터리 폴링 주기.

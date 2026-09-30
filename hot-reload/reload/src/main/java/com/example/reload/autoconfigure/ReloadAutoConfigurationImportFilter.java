@@ -4,6 +4,8 @@ import java.util.Set;
 
 import org.springframework.boot.autoconfigure.AutoConfigurationImportFilter;
 import org.springframework.boot.autoconfigure.AutoConfigurationMetadata;
+import org.springframework.boot.context.properties.bind.Binder;
+import com.example.reload.ReloadProperties;
 import org.springframework.context.EnvironmentAware;
 import org.springframework.core.env.Environment;
 
@@ -25,7 +27,9 @@ public class ReloadAutoConfigurationImportFilter implements AutoConfigurationImp
 
 	@Override
 	public void setEnvironment(Environment environment) {
-		this.enabled = environment.getProperty("reload.enabled", Boolean.class, true);
+		ReloadProperties properties = Binder.get(environment).bind("reload", ReloadProperties.class)
+				.orElseGet(ReloadProperties::new);
+		this.enabled = properties.isEnabled() && properties.isHybrid();
 	}
 
 	@Override

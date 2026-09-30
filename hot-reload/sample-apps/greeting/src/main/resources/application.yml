@@ -6,6 +6,10 @@ server:
   port: 8080
 
 reload:
+
+  # 빠른 재로딩은 명시한 업무 영역에만 적용한다. 그 밖의 변경은 전체 JVM 재시작이다.
+  business-packages: [com.example.greeting.web]
+  watch-paths: [sample-apps/greeting/build/resources/main, sample-apps/greeting/build.gradle, build.gradle, settings.gradle]
   # 부모 소유 패키지: 부모·자식이 공유하는 타입과 부모 bean. 나머지 애플리케이션 클래스는 재로딩 대상이다.
   parent-packages: [com.example.greeting.shared]
   # classpath, base-packages는 생략하면 @SpringBootApplication 클래스 기준으로 정해진다.

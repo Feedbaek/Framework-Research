@@ -226,7 +226,6 @@ class MethodInterceptionScenarioTest extends AbstractReloadScenarioTest {
 	}
 
 	@Test
-	@KnownIssue("부모의 MethodValidationPostProcessor는 자식 bean을 처리하지 않아 @Validated 메서드 검증이 빠진다 (1장)")
 	void methodValidationRejectsInvalidArgument() {
 		deploy(Map.of("NameService", """
 				package com.example.app;

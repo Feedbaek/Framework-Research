@@ -1,6 +1,7 @@
 package com.example.reload.generation;
 
 import java.net.URL;
+import java.util.Set;
 
 import com.example.reload.devtools.restart.classloader.RestartClassLoader;
 import com.example.reload.layout.ClassOwnership;
@@ -15,14 +16,23 @@ import com.example.reload.layout.ClassOwnership;
 class GenerationClassLoader extends RestartClassLoader {
 
 	private final ClassOwnership ownership;
+	private final Set<String> deletedClasses;
 
 	GenerationClassLoader(ClassLoader parent, URL[] urls, ClassOwnership ownership) {
+		this(parent, urls, ownership, Set.of());
+	}
+
+	GenerationClassLoader(ClassLoader parent, URL[] urls, ClassOwnership ownership, Set<String> deletedClasses) {
 		super(parent, urls);
 		this.ownership = ownership;
+		this.deletedClasses = Set.copyOf(deletedClasses);
 	}
 
 	@Override
 	public Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
+		if (this.deletedClasses.contains(name)) {
+			throw new ClassNotFoundException("Deleted business class: " + name);
+		}
 		if (this.ownership.isParentOwned(name)) {
 			return Class.forName(name, false, getParent());
 		}

@@ -200,6 +200,8 @@ class HotReloadIntegrationTest {
 	private void deployAndAwait(String version) {
 		int generationBefore = this.manager.currentGenerationId();
 		compiler.deploy(version);
+		// 동일한 바이트의 재컴파일은 더 이상 파일 변경으로 취급하지 않는다.
+		assertThat(this.manager.reload()).isTrue();
 		await("generation after " + generationBefore + " serving " + version,
 				() -> this.manager.currentGenerationId() > generationBefore);
 	}

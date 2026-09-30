@@ -182,6 +182,7 @@ abstract class AbstractAopLeakTest {
 	private void deployAndAwait(String variant, String configAnnotations, String controllerAnnotations) {
 		int generationBefore = this.manager.currentGenerationId();
 		deploy(compiler(), variant, configAnnotations, controllerAnnotations);
+		assertThat(GenerationFixtures.install(this.manager).reloaded()).isTrue();
 		long deadline = System.nanoTime() + TIMEOUT.toNanos();
 		while (this.manager.currentGenerationId() <= generationBefore) {
 			if (System.nanoTime() > deadline) {

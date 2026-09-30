@@ -108,7 +108,8 @@ abstract class AbstractReloadScenarioTest {
 
 	void deploy(Map<String, String> sources, Map<String, String> resources) {
 		compiler().replaceSources(getClass().getSimpleName(), sources, resources);
-		reload();
+		ReloadResult result = GenerationFixtures.install(this.manager);
+		assertThat(result.reloaded()).as("fixture setup: %s", result.error()).isTrue();
 	}
 
 	/**

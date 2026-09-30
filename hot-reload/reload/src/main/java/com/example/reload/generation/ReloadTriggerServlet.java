@@ -35,15 +35,26 @@ public class ReloadTriggerServlet extends HttpServlet {
 		json.append(",\"durationMillis\":").append(result.durationMillis());
 		json.append(",\"failedReloads\":").append(this.manager.failedReloads());
 		json.append(",\"error\":").append((result.error() != null) ? quote(result.error()) : "null");
+		json.append(",\"action\":").append(quote(result.action()));
+		json.append(",\"reasons\":[").append(result.reasons().stream().map(ReloadTriggerServlet::quote)
+				.collect(java.util.stream.Collectors.joining(","))).append(']');
 		json.append('}');
-		write(response, result.reloaded() ? HttpServletResponse.SC_OK : HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
-				json);
+		int status = switch (result.action()) {
+			case "reload" -> HttpServletResponse.SC_OK;
+			case "restart-requested" -> HttpServletResponse.SC_ACCEPTED;
+			case "restart-required" -> HttpServletResponse.SC_CONFLICT;
+			default -> HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
+		};
+		write(response, status, json);
+		response.flushBuffer();
 	}
 
 	@Override
 	protected void doGet(HttpServletRequest request, HttpServletResponse response) throws IOException {
 		StringBuilder json = new StringBuilder("{");
 		json.append("\"mode\":").append(quote(this.manager.triggerMode().name().toLowerCase(Locale.ROOT)));
+		json.append(",\"strategy\":").append(quote(this.manager.strategy()));
+		json.append(",\"restartAvailable\":").append(this.manager.restartAvailable());
 		json.append(",\"generation\":").append(this.manager.currentGenerationId());
 		json.append(",\"failedReloads\":").append(this.manager.failedReloads());
 		json.append('}');

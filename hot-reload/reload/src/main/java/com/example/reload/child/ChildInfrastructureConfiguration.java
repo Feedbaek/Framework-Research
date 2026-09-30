@@ -32,6 +32,17 @@ import org.springframework.util.ClassUtils;
 @Configuration(proxyBeanMethods = false)
 public class ChildInfrastructureConfiguration {
 
+	@Configuration(proxyBeanMethods = false)
+	@ConditionalOnClass(name = "jakarta.validation.Validator")
+	static class ChildValidationConfiguration {
+		@Bean
+		static org.springframework.validation.beanvalidation.MethodValidationPostProcessor methodValidationPostProcessor() {
+			var processor = new org.springframework.validation.beanvalidation.MethodValidationPostProcessor();
+			processor.setProxyTargetClass(true);
+			return processor;
+		}
+	}
+
 	@Bean
 	static ChildAutoProxyCreatorRegistrar childAutoProxyCreatorRegistrar() {
 		return new ChildAutoProxyCreatorRegistrar();

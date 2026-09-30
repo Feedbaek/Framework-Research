@@ -1,5 +1,7 @@
 # hot-reload: AOP·프록시 위험 케이스
 
+> 당시 조사 기록이다. 현재 정책은 [hybrid-reload-spec.md](hybrid-reload-spec.md)를 따른다. 메서드 검증은 세대별 후처리기를 추가해 기본 회귀 테스트에 포함했다.
+
 2026-09-28 기준
 
 가장 위험한 것은 오류 없이 조용히 꺼지는 기능입니다. `@PreAuthorize` 미적용, 자식 Filter 미등록, `@Async`/`@Scheduled`/`@KafkaListener` 무시가 여기에 해당합니다. 그다음은 재로딩 뒤의 `ClassCastException`(CCE)과 이전 세대 클래스로더 누수입니다.

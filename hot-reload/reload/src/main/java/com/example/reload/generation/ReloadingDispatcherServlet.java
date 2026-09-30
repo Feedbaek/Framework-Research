@@ -76,7 +76,7 @@ public class ReloadingDispatcherServlet extends HttpServlet {
 		Thread thread = Thread.currentThread();
 		ClassLoader previousTccl = thread.getContextClassLoader();
 		thread.setContextClassLoader(generation.classLoader());
-		try {
+		try (GenerationScope scope = GenerationScope.enter(generation.context())) {
 			generation.dispatcher().service(request, response);
 		}
 		finally {

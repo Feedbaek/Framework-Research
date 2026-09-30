@@ -33,8 +33,10 @@ public class ReloadApplicationListener implements ApplicationListener<Applicatio
 		}
 		ReloadLayout layout = ReloadLayout.resolve(properties, context.getBeanFactory());
 		context.getBeanFactory().registerSingleton(ReloadLayout.BEAN_NAME, layout);
-		context.getBeanFactory()
+		if (properties.isHybrid()) {
+			context.getBeanFactory()
 			.registerSingleton(ReloadParentTypeExcludeFilter.BEAN_NAME, new ReloadParentTypeExcludeFilter(layout));
+		}
 	}
 
 }
