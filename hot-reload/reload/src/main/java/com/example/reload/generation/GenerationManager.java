@@ -271,17 +271,24 @@ public class GenerationManager {
 				this.layout.ownership(), deleted);
 		Generation generation = new Generation(id, loader, this.cacheCleaner);
 		Throwable failure = null;
+		String phases = "";
 		Thread thread = Thread.currentThread();
 		ClassLoader previousTccl = thread.getContextClassLoader();
 		thread.setContextClassLoader(loader);
 		try {
-			AnnotationConfigWebApplicationContext context = createContext(id, loader);
+			GenerationApplicationContext context = createContext(id, loader);
 			generation.setContext(context);
 			context.refresh();
+			long refreshed = System.nanoTime();
 			generation.setDispatcher(createDispatcher(id, context));
 			this.parentContext.getBeanProvider(GenerationIntegration.class).orderedStream()
 					.forEach((integration) -> integration.validate(context));
-			if (!candidate.equals(this.changePlanner.snapshot())) {
+			long initialized = System.nanoTime();
+			boolean unchanged = candidate.equals(this.changePlanner.snapshot());
+			phases = " [refresh=" + (refreshed - startTime) / 1_000_000 + " ms " + context.phases() + ", dispatcher="
+					+ (initialized - refreshed) / 1_000_000 + " ms, verify="
+					+ (System.nanoTime() - initialized) / 1_000_000 + " ms]";
+			if (!unchanged) {
 				throw new IllegalStateException("Files changed while building the generation; retry after compilation finishes");
 			}
 		}
@@ -303,7 +310,7 @@ public class GenerationManager {
 		this.baseline = candidate;
 		this.knownBusinessClasses.addAll(present);
 		logger.info("Generation " + id + " started in " + durationMillis + " ms"
-				+ ((previous != null) ? " (replacing generation " + previous.id() + ")" : ""));
+				+ ((previous != null) ? " (replacing generation " + previous.id() + ")" : "") + phases);
 		if (previous != null) {
 			previous.retire(this.drainScheduler, this.properties.getDrainTimeout());
 			if (!previous.isDisposed()) {
@@ -339,8 +346,8 @@ public class GenerationManager {
 
 	public boolean restartAvailable() { return this.fullRestart.available(); }
 
-	private AnnotationConfigWebApplicationContext createContext(int id, ClassLoader loader) {
-		AnnotationConfigWebApplicationContext context = new GenerationApplicationContext(this.layout);
+	private GenerationApplicationContext createContext(int id, ClassLoader loader) {
+		GenerationApplicationContext context = new GenerationApplicationContext(this.layout);
 		context.setId(this.parentContext.getId() + ":generation-" + id);
 		context.setDisplayName("Reload generation " + id);
 		context.setParent(this.parentContext);
@@ -359,6 +366,9 @@ public class GenerationManager {
 	/**
 	 * 자식이 스캔할 패키지. 설정이 없으면 부모의 auto-configuration 패키지({@code @SpringBootApplication}
 	 * 클래스의 패키지)를 쓴다.
+	 * <p>
+	 * 자식 컴포넌트는 business-packages 안에만 있으므로 스캔 범위를 그 안으로 좁힌다. 좁히지 않으면 부모 소유
+	 * 클래스 파일까지 세대마다 읽고 나서 필터로 버린다.
 	 */
 	private List<String> basePackages() {
 		List<String> basePackages = this.basePackages;
@@ -368,9 +378,31 @@ public class GenerationManager {
 				basePackages = AutoConfigurationPackages.get(this.parentContext.getBeanFactory());
 				logger.info("reload.base-packages not set; scanning " + basePackages + " in each generation");
 			}
-			this.basePackages = List.copyOf(basePackages);
+			this.basePackages = narrowToBusinessPackages(basePackages, this.properties.getBusinessPackages());
 		}
 		return this.basePackages;
+	}
+
+	static List<String> narrowToBusinessPackages(List<String> basePackages, List<String> businessPackages) {
+		if (businessPackages.isEmpty()) {
+			return List.copyOf(basePackages);
+		}
+		Set<String> narrowed = new java.util.LinkedHashSet<>();
+		for (String basePackage : basePackages) {
+			for (String businessPackage : businessPackages) {
+				if (isWithin(businessPackage, basePackage)) {
+					narrowed.add(businessPackage);
+				}
+				else if (isWithin(basePackage, businessPackage)) {
+					narrowed.add(basePackage);
+				}
+			}
+		}
+		return List.copyOf(narrowed);
+	}
+
+	private static boolean isWithin(String packageName, String enclosing) {
+		return packageName.equals(enclosing) || packageName.startsWith(enclosing + ".");
 	}
 
 	private DispatcherServlet createDispatcher(int id, WebApplicationContext context) throws Exception {

@@ -718,6 +718,66 @@ class PureJavaParentScenarioTest {
 	}
 
 	@Test
+	void parentControllerAdviceAppliesToChildControllersInEveryGeneration() throws Exception {
+		try (ConsumerApp app = ConsumerApp.start(sources(DOMAIN_EXCEPTION, """
+				package com.example.app.domain;
+
+				import org.springframework.http.HttpStatus;
+				import org.springframework.web.bind.annotation.ExceptionHandler;
+				import org.springframework.web.bind.annotation.ModelAttribute;
+				import org.springframework.web.bind.annotation.ResponseStatus;
+				import org.springframework.web.bind.annotation.RestControllerAdvice;
+
+				@RestControllerAdvice
+				public class ParentAdvice {
+
+					@ModelAttribute("shared")
+					public String shared() {
+						return "from-parent";
+					}
+
+					@ExceptionHandler(DomainException.class)
+					@ResponseStatus(HttpStatus.CONFLICT)
+					public String handle(DomainException ex) {
+						return ex.getMessage();
+					}
+
+				}
+				""", """
+				package com.example.app.web;
+
+				import org.springframework.web.bind.annotation.GetMapping;
+				import org.springframework.web.bind.annotation.ModelAttribute;
+				import org.springframework.web.bind.annotation.RestController;
+
+				import com.example.app.domain.DomainException;
+
+				@RestController
+				public class AdvisedController {
+
+					@GetMapping("/shared")
+					public String shared(@ModelAttribute("shared") String shared) {
+						return shared;
+					}
+
+					@GetMapping("/failing")
+					public String failing() {
+						throw new DomainException("handled by parent");
+					}
+
+				}
+				"""))) {
+			for (int i = 0; i < 2; i++) {
+				assertThat(app.getOk("/shared")).isEqualTo("from-parent");
+				HttpResponse<String> response = app.get("/failing");
+				assertThat(response.statusCode()).isEqualTo(409);
+				assertThat(response.body()).isEqualTo("handled by parent");
+				app.reloadSuccessfully();
+			}
+		}
+	}
+
+	@Test
 	void parentRecordsWorkAsValidatedRequestAndResponseBodies() throws Exception {
 		try (ConsumerApp app = ConsumerApp.start(sources(MONEY, ORDER_STATUS, ORDER, CREATE_ORDER_REQUEST, """
 				package com.example.app.web;

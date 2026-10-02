@@ -401,10 +401,18 @@ class WebLayerScenarioTest extends AbstractReloadScenarioTest {
 		assertThat(getJson("/person")).containsOnlyKeys("first_name");
 	}
 
+	/**
+	 * 부모에는 MVC가 없으므로 세대의 핸들러 매핑이 부모 컨트롤러도 찾는다(예: ProObject 마스터가 호출하는
+	 * {@code /proobject/system/HealthStatus}). 세대를 교체한 뒤에도 매핑된다.
+	 */
 	@Test
-	@KnownIssue("부모에 등록된 라이브러리 컨트롤러는 부모에 MVC가 없어 매핑되지 않는다 (6장)")
 	void libraryControllerRegisteredInParentIsMapped() {
 		deploy(Map.of("PingController", PING_CONTROLLER));
+
+		assertThat(getOk("/library/info")).isEqualTo("library");
+		assertThat(getOk("/ping")).isEqualTo("pong");
+
+		reload();
 
 		assertThat(getOk("/library/info")).isEqualTo("library");
 	}

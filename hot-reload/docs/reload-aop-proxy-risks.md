@@ -84,6 +84,7 @@
   - 부모 소유 서비스가 발행한 도메인 이벤트
   - Security의 `AuthenticationSuccessEvent`
 - **자식의 `ApplicationRunner`/`CommandLineRunner`는 실행되지 않습니다.** `SpringApplication`은 부모 context의 runner만 호출합니다. [추정]
+- **세대 lifecycle 이벤트는 부모로 보내지 않습니다.** 세대 자신의 `ContextRefreshedEvent`/`ContextClosedEvent` 등은 세대 안에서만 발행됩니다. 부모 리스너 중 출처를 확인하지 않는 것이 이를 애플리케이션 종료로 처리하기 때문입니다(JEUS starter의 `JEUSFinalizer`가 TM 서버를 내리면서 HTTP와 함께 쓰는 `jeus` 리스너가 닫히고, ProObject가 master 등록을 해제함). [확인: `EventsAndLifecycleScenarioTest.generationLifecycleEventsDoNotReachParentListeners`]
 - **자식에서 부모로 가는 이벤트**: 부모 리스너가 이벤트 객체를 보관하면 누수가 됩니다. 또 `publishEvent(Object)`로 보낸 payload 이벤트는 부모 `applicationEventMulticaster`의 `retrieverCache`에 `PayloadApplicationEvent<자식 타입>` 키로 남아 모든 이전 세대를 붙잡습니다. [확인: 8장]
 - **`@PostConstruct`는 세대마다 다시 실행됩니다.** 여기서 외부에 등록하면 등록이 쌓이고 이전 세대가 수거되지 않습니다.
   - 대상: Micrometer gauge, JMX, 정적 레지스트리, 부모 bean에 추가하는 리스너·콜백, shutdown hook
@@ -102,8 +103,8 @@
   - 대응: Security 설정은 `parent-packages`에 두고, 거기서 참조하는 `UserDetailsService` 같은 타입도 함께 부모로 옮깁니다.
 - **Security `requestMatchers(String)`** [추정]: 부모에 `mvcHandlerMappingIntrospector`가 없고 `api` 모드에서는 서블릿이 두 개입니다. Security 버전에 따라 기동이 실패하거나 Ant 매처로 fallback할 수 있습니다.
 - **파일 업로드** [확인/추정]: `ReloadAutoConfiguration.java:51`의 서블릿 등록에 multipart 설정이 없습니다. `MultipartFile` 수신이 실패하고 `spring.servlet.multipart.*` 설정이 무시될 것으로 봅니다.
-- **라이브러리가 제공하는 웹 엔드포인트** [추정]: springdoc, actuator HTTP 엔드포인트(`DispatcherServlet` bean을 조건으로 함), Spring Boot Admin 등은 부모에 등록됩니다. 부모에는 MVC가 없으므로 404가 날 수 있습니다.
-- **`parent-packages`에 둔 `@Controller`는 매핑되지 않습니다.** 자식 핸들러 매핑은 부모 context의 컨트롤러를 찾지 않습니다(`detectHandlerMethodsInAncestorContexts=false`).
+- **라이브러리가 제공하는 웹 엔드포인트** [추정]: 부모에 `@Controller` bean으로 등록되는 것(springdoc, Spring Boot Admin, ProObject `/proobject/system/**` 등)은 아래와 같이 세대 매핑이 처리합니다. 자체 핸들러 매핑을 쓰는 actuator HTTP 엔드포인트(`DispatcherServlet` bean을 조건으로 함)는 부모에 MVC가 없으므로 404가 날 수 있습니다.
+- **부모의 `@Controller`(라이브러리, `parent-packages`)도 세대가 매핑합니다.** 세대 핸들러 매핑은 `detectHandlerMethodsInAncestorContexts=true`로 부모 컨트롤러를 찾고, 세대의 어댑터(ProObject 포함)로 처리합니다. 세대가 부모 bean을 참조하는 방향이라 누수가 없습니다. 부모와 자식 컨트롤러가 같은 매핑을 가지면 세대 생성이 실패합니다(일반 앱의 기동 실패와 같음). 부모 컨트롤러 코드를 바꾸면 전체 재시작입니다. [확인: `WebLayerScenarioTest.libraryControllerRegisteredInParentIsMapped`]
 - **운영(`reload.enabled=false`)과 동작이 다른 Boot MVC 기본값**
   - `classpath:/static` 정적 리소스 제공
   - `/error`의 `BasicErrorController`
@@ -161,7 +162,7 @@
 - 자식 `@EnableScheduling`을 쓰면 이전 세대가 drain되는 동안 두 세대의 작업이 함께 돕니다(500ms 동안 8회).
 - `@SessionScope`, 세션 속성, `@Cacheable` 값은 재로딩 뒤 500이 납니다. 부모에 등록한 커스텀 스코프는 요청 시 `No Scope registered`로 실패합니다.
 - 부모 `ObjectMapper`를 직접 쓰면 누수가 생기고, `copy()`한 복사본을 쓰면 생기지 않습니다. 부모 `Validator`도 누수가 생깁니다(Hibernate Validator 캐시는 SOFT 참조라 메모리 압박 전까지 잔존).
-- 자식 Filter·`FilterRegistrationBean` 미적용, multipart(`no multi-part configuration`), 정적 리소스 404, Boot 오류 JSON 없음, 부모 `HttpMessageConverter` bean 미사용, 자식 Jackson customizer 미적용, 라이브러리 컨트롤러 404를 모두 확인했습니다.
+- 자식 Filter·`FilterRegistrationBean` 미적용, multipart(`no multi-part configuration`), 정적 리소스 404, Boot 오류 JSON 없음, 부모 `HttpMessageConverter` bean 미사용, 자식 Jackson customizer 미적용을 모두 확인했습니다. (라이브러리 컨트롤러 404는 세대 매핑이 부모 컨트롤러를 찾도록 해결했습니다.)
 - 자식 패키지의 `SecurityFilterChain`은 적용되지 않고 Boot 기본 체인이 401을 돌려줍니다.
 - gauge는 첫 세대 값에 고정되고(이후 NaN), 첫 세대를 붙잡습니다.
 

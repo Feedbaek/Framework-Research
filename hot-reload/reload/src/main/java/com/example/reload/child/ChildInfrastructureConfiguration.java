@@ -24,10 +24,12 @@ import org.springframework.util.ClassUtils;
  * {@code Advisor} bean은 적용하지 않음). 부모 Boot의 {@code AopAutoConfiguration}처럼 기본은 클래스 프록시.</li>
  * <li>트랜잭션: 부모에 {@code TransactionManager}가 있으면 자식에도 {@code @EnableTransactionManagement}.</li>
  * <li>캐시: 부모에 캐시 인터셉터({@code @EnableCaching})가 있으면 자식에도 {@code @EnableCaching}.</li>
+ * <li>메서드 검증: {@code jakarta.validation.Validator}가 클래스패스에 있으면
+ * {@code MethodValidationPostProcessor}(클래스 프록시).</li>
  * </ul>
- * 트랜잭션 매니저와 {@code CacheManager}는 부모 bean을 그대로 쓴다. {@code @Async}, {@code @Scheduled},
- * 메서드 검증처럼 BeanPostProcessor로 동작하는 기능은 켜지 않는다. 필요하면 애플리케이션이 자식
- * 패키지에 {@code @Enable*}을 선언한다.
+ * 트랜잭션 매니저와 {@code CacheManager}는 부모 bean을 그대로 쓴다. {@code @Async}, {@code @Scheduled}처럼
+ * BeanPostProcessor로 동작하는 그 밖의 기능은 켜지 않는다. 필요하면 애플리케이션이 자식 패키지에
+ * {@code @Enable*}을 선언한다.
  */
 @Configuration(proxyBeanMethods = false)
 public class ChildInfrastructureConfiguration {

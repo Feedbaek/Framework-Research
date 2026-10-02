@@ -20,7 +20,8 @@ public class ChildAspectJAutoProxyCreator extends AnnotationAwareAspectJAutoProx
 
 	@Override
 	protected void initBeanFactory(ConfigurableListableBeanFactory beanFactory) {
-		super.initBeanFactory(beanFactory);
+		// advisor·aspect 탐색이 부모의 모든 빈 이름을 합칠 때 제곱 시간이 들지 않도록 뷰를 넘긴다.
+		super.initBeanFactory(AncestorLookup.of(beanFactory, ConfigurableListableBeanFactory.class));
 		this.beanFactory = beanFactory;
 	}
 

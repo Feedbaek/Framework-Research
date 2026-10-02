@@ -2,10 +2,12 @@ package com.example.reload.restart;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -50,7 +52,8 @@ class FullRestartScenarioTest {
 			String first = get("/value").body();
 			assertThat(first).startsWith("v1:infra1:");
 			compile("v2", "infra1", false);
-			assertThat(reload().statusCode()).isEqualTo(200);
+			HttpResponse<String> partial = reload();
+			assertThat(partial.statusCode()).as(partial.body()).isEqualTo(200);
 			assertThat(get("/value").body()).isEqualTo(first.replace("v1:", "v2:"));
 			assertThat(get("/pid").body()).isEqualTo(Long.toString(firstPid));
 
@@ -73,7 +76,7 @@ class FullRestartScenarioTest {
 			// 전체 재시작 후 시작 실패는 감독자까지 종료한다(무한 재시작 방지).
 			compile("broken", "infra3", true);
 			assertThat(reload().statusCode()).isEqualTo(202);
-			assertThat(this.supervisor.waitFor(25, TimeUnit.SECONDS)).as(Files.readString(log)).isTrue();
+			assertThat(this.supervisor.waitFor(25, TimeUnit.SECONDS)).as(this::processLog).isTrue();
 			assertThat(this.supervisor.exitValue()).isNotZero();
 		}
 		finally {
@@ -101,7 +104,23 @@ class FullRestartScenarioTest {
 			}
 			Thread.sleep(100);
 		}
-		fail("Application did not become ready:\n" + Files.readString(this.directory.resolve("process.log")));
+		fail("Application did not become ready:\n" + processLog());
+	}
+
+	/**
+	 * 자식 JVM은 출력이 리다이렉트되면 플랫폼 인코딩(예: MS949)으로 쓴다. UTF-8로 엄격하게 읽으면 실패하므로 그
+	 * 인코딩으로 읽고 해석할 수 없는 바이트는 치환한다.
+	 */
+	private String processLog() {
+		try {
+			String encoding = System.getProperty("native.encoding");
+			Charset charset = (encoding != null && Charset.isSupported(encoding)) ? Charset.forName(encoding)
+					: Charset.defaultCharset();
+			return new String(Files.readAllBytes(this.directory.resolve("process.log")), charset);
+		}
+		catch (IOException ex) {
+			return "(process.log unavailable: " + ex + ")";
+		}
 	}
 
 	private HttpResponse<String> get(String path) throws Exception {

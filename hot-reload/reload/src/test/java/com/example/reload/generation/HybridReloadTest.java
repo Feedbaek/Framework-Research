@@ -26,6 +26,17 @@ class HybridReloadTest {
 		""";
 
 	@Test
+	void generationScanIsNarrowedToBusinessPackages() {
+		assertThat(GenerationManager.narrowToBusinessPackages(List.of("com.example.app"),
+				List.of("com.example.app.web", "com.example.app.batch", "org.other")))
+			.containsExactly("com.example.app.web", "com.example.app.batch");
+		assertThat(GenerationManager.narrowToBusinessPackages(List.of("com.example.app.web.api", "com.example.application"),
+				List.of("com.example.app"))).containsExactly("com.example.app.web.api");
+		assertThat(GenerationManager.narrowToBusinessPackages(List.of("com.example.app"), List.of()))
+			.containsExactly("com.example.app");
+	}
+
+	@Test
 	void nestedCallsRemainOnRetiringGenerationUntilOperationFinishes() throws Throwable {
 		try (ConsumerApp app = ConsumerApp.start(sources(PARENT.formatted("infra"), WEB.formatted("v1")))) {
 			var previous = app.manager().current().context();

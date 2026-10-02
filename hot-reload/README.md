@@ -76,8 +76,13 @@ reload:
 
 상대 경로는 애플리케이션 프로세스의 작업 디렉터리 기준이다. 실행 클래스패스의 디렉터리와 JAR는
 자동 검사하며, 그 밖의 빌드 파일·외부 설정·ProObject 서비스 XML은 watch-paths에 지정한다.
-JAR는 크기/수정 시각으로, 클래스·리소스는 내용 해시로 비교한다. business-packages의 빈 목록은
-일반 Boot + 전체 재시작 모드다.
+JAR는 크기/수정 시각으로, 클래스·리소스는 내용 해시로 비교한다(크기와 수정 시각이 그대로인 파일은
+이전 해시를 재사용). business-packages의 빈 목록은 일반 Boot + 전체 재시작 모드다. 세대의 컴포넌트
+스캔은 base-packages 중 business-packages와 겹치는 범위만 대상으로 한다.
+
+세대 교체 로그(`Generation N started in ...`)에는 단계별 시간(scan, singletons, verify 등)이 함께 남는다.
+부모 빈이 많을 때의 교체 시간은 `RELOAD_SCALE_BEANS=20000 ./gradlew :reload:test --rerun --tests
+'*ParentScaleBenchmarkTest' -i`로 잰다.
 
 감독자는 JDK만으로 실행할 수 있다(엔진 JAR 경로는 빌드 결과에 맞게 지정).
 

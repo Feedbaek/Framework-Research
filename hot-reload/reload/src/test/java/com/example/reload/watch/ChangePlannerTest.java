@@ -2,6 +2,7 @@ package com.example.reload.watch;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.util.List;
 
 import com.example.reload.ReloadProperties;
@@ -58,6 +59,20 @@ class ChangePlannerTest {
 		writeClass("test/business/Service", 1, null);
 		assertThat(planner.plan(before, planner.snapshot()).action()).isEqualTo(ChangePlanner.Action.NONE);
 		Files.delete(service);
+		assertThat(planner.plan(before, planner.snapshot()).action()).isEqualTo(ChangePlanner.Action.RELOAD);
+	}
+
+	@Test
+	void unchangedOldFilesAreReusedButLaterEditsOfTheSameSizeAreStillDetected() throws Exception {
+		ChangePlanner planner = planner(true);
+		Path service = writeClass("test/business/Service", 1, null);
+		// 방금 쓰인 파일은 재사용하지 않으므로 오래된 파일로 만든다.
+		Files.setLastModifiedTime(service, FileTime.fromMillis(System.currentTimeMillis() - 60_000));
+		long size = Files.size(service);
+		var before = planner.snapshot();
+		assertThat(planner.snapshot()).isEqualTo(before);
+		writeClass("test/business/Service", 2, null);
+		assertThat(Files.size(service)).isEqualTo(size);
 		assertThat(planner.plan(before, planner.snapshot()).action()).isEqualTo(ChangePlanner.Action.RELOAD);
 	}
 

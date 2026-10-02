@@ -12,6 +12,7 @@ import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.event.ApplicationContextEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -188,6 +189,43 @@ class EventsAndLifecycleScenarioTest extends AbstractReloadScenarioTest {
 		assertThat(this.probe.events("refreshed")).singleElement().asString().startsWith("Reload generation");
 	}
 
+	/**
+	 * 세대의 기동·종료 이벤트는 부모로 전파되지 않는다. 부모 리스너(JEUS {@code JEUSFinalizer}, ProObject 등)는
+	 * 출처를 확인하지 않고 {@code ContextClosedEvent}를 애플리케이션 종료로 처리한다. 세대 자신의 리스너는 계속 받는다.
+	 */
+	@Test
+	void generationLifecycleEventsDoNotReachParentListeners() {
+		deploy(Map.of("ClosedListener", """
+				package com.example.app;
+
+				import org.springframework.context.event.ContextClosedEvent;
+				import org.springframework.context.event.EventListener;
+				import org.springframework.stereotype.Component;
+
+				import com.example.reload.fixture.Probe;
+
+				@Component
+				public class ClosedListener {
+
+					private final Probe probe;
+
+					public ClosedListener(Probe probe) {
+						this.probe = probe;
+					}
+
+					@EventListener
+					public void on(ContextClosedEvent event) {
+						this.probe.record("child-closed", event.getApplicationContext().getDisplayName());
+					}
+
+				}
+				"""));
+		reload();
+
+		assertThat(this.probe.events("child-closed")).singleElement().asString().startsWith("Reload generation");
+		assertThat(this.probe.events("parent-lifecycle")).isEmpty();
+	}
+
 	@Test
 	@KnownIssue("SpringApplication은 부모 context의 runner만 호출하므로 자식 ApplicationRunner가 실행되지 않는다 (5장)")
 	void childApplicationRunnerRuns() {
@@ -282,6 +320,31 @@ class EventsAndLifecycleScenarioTest extends AbstractReloadScenarioTest {
 		@Bean
 		ParentDomainEventListener parentDomainEventListener(Probe probe) {
 			return new ParentDomainEventListener(probe);
+		}
+
+		@Bean
+		ParentLifecycleListener parentLifecycleListener(Probe probe) {
+			return new ParentLifecycleListener(probe);
+		}
+
+	}
+
+	/**
+	 * 부모 리스너. 다른 context(세대)에서 온 lifecycle 이벤트의 종류만 기록한다.
+	 */
+	static class ParentLifecycleListener {
+
+		private final Probe probe;
+
+		ParentLifecycleListener(Probe probe) {
+			this.probe = probe;
+		}
+
+		@EventListener
+		public void on(ApplicationContextEvent event) {
+			if (event.getApplicationContext().getParent() != null) {
+				this.probe.record("parent-lifecycle", event.getClass().getSimpleName());
+			}
 		}
 
 	}
