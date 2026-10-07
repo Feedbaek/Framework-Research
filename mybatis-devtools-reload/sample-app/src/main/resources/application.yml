@@ -1,0 +1,17 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:sample;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+
+mybatis:
+  mapper-locations: classpath:mapper/**/*.xml
+
+mybatis-reload:
+  enabled: true
+  # watch-dirs: [src/main/resources]          # 기본값. 상대 경로는 작업 디렉터리 기준
+  # devtools-restart-exclude: [mapper/**]     # 기본값: mapper/**, mappers/**, **/*Mapper.xml
+
+logging:
+  level:
+    io.devreload.mybatis: INFO

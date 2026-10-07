@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="io.devreload.sample.UserMapper">
+
+    <!-- ORDER BY(또는 WHERE 절)를 바꾸고 저장하면, 다음 GET /users 부터 새 SQL이 쓰인다. -->
+    <select id="findAll" resultType="io.devreload.sample.User">
+        SELECT id, name
+        FROM users
+        ORDER BY id
+    </select>
+
+</mapper>

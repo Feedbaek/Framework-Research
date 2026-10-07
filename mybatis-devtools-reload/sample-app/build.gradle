@@ -1,0 +1,15 @@
+plugins {
+    id 'org.springframework.boot'
+}
+
+description = 'Sample application: edit src/main/resources/mapper/UserMapper.xml while it runs'
+
+dependencies {
+    implementation project(':mybatis-devtools-reload')
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.mybatis.spring.boot:mybatis-spring-boot-starter'
+    runtimeOnly 'com.h2database:h2'
+    developmentOnly 'org.springframework.boot:spring-boot-devtools'
+}
+
+// bootRun의 작업 디렉터리는 이 모듈이므로, 기본 감시 디렉터리(src/main/resources)가 이 모듈 기준으로 해석된다.
