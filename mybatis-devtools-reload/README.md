@@ -42,7 +42,6 @@ mybatis-reload:
 예제 실행:
 
 ```bash
-gradle wrapper          # 최초 1회 (wrapper 미포함)
 ./gradlew :sample-app:bootRun
 curl localhost:8080/users
 # sample-app/src/main/resources/mapper/UserMapper.xml 의 ORDER BY 를 바꾸고 저장
