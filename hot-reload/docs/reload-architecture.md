@@ -28,10 +28,44 @@
 
 hybrid 모드(`reload.business-packages` 지정)에서 소비자 애플리케이션은 **하나의 JVM 안에서 두 층**으로 나뉜다.
 
+```mermaid
+flowchart TB
+
+  subgraph jvm["애플리케이션 JVM"]
+    subgraph parent["부모 context · 앱 클래스로더 · JVM 수명 동안 유지"]
+      was["내장 WAS<br/>부모 Filter 체인"]
+      rds["ReloadingDispatcherServlet<br/>매핑 /"]
+      rts["ReloadTriggerServlet<br/>매핑 /_reload<br/>api · both 모드"]
+      gm["GenerationManager"]
+      shared["< 공용 bean ><br/>DataSource<br/>TransactionManager<br/>CacheManager<br/>ObjectMapper<br/>부모 소유 애플리케이션 bean"]
+    end
+
+    subgraph current["자식 세대 N (현재)"]
+      gen["GenerationClassLoader<br/>GenerationApplicationContext"]
+      ds["DispatcherServlet<br/>세대별 MVC"]
+      biz["업무 컨트롤러<br/>서비스 · DTO"]
+    end
+
+    subgraph retired["자식 세대 N-1 (retire됨)"]
+      old["진행 중 요청 drain<br/>→ dispose<br/>→ 클래스로더 수거"]
+    end
+  end
+
+  was --> rds
+  was --> rts
+  rts -->|"reloadWithResult()"| gm
+  rds -->|"current()"| gm
+  rds ==>|"요청마다<br/>acquire → service → release"| ds
+  ds --> biz
+  biz -->|"주입 · 호출<br/>자식 → 부모 방향만"| shared
+  gm -->|"생성 · 교체"| gen
+  gen -->|"보유"| ds
+  gm -.->|"retire"| old
 ```
- (선택) RestartLauncher ── 감독자 프로세스. 요청 파일이 생긴 종료만 같은 명령으로 다시 실행
-        │  HOT_RELOAD_RESTART_FILE 환경 변수
-        ▼
+
+굵은 화살표가 업무 요청이 지나가는 길이다. 각 층에 들어 있는 것을 풀어 쓰면 다음과 같다.
+
+```
 ┌─ 애플리케이션 JVM ────────────────────────────────────────────────────────────┐
 │                                                                              │
 │  부모 context  (SpringApplication이 만든 일반 Boot context, 앱 클래스로더)       │
@@ -181,6 +215,17 @@ hybrid 모드의 부모에는 MVC가 없으므로, 컨트롤러는 부모에 두
 즉 **기본은 부모**이고, `business-packages` 안에서 `parent-packages`와 애플리케이션 클래스를 뺀 것만 자식이다.
 패키지 판정은 `className.startsWith(pkg + ".")`이므로 하위 패키지를 포함한다.
 
+```mermaid
+flowchart TD
+  start(["클래스 이름<br/>중첩 클래스는 최상위 클래스 이름으로"]) --> pp{"parent-packages에<br/>속하는가?"}
+  pp -- 예 --> parentOwned["부모 소유"]
+  pp -- 아니오 --> app{"애플리케이션 클래스인가?<br/>@SpringBootConfiguration"}
+  app -- 예 --> parentOwned
+  app -- 아니오 --> bp{"business-packages에<br/>속하는가?"}
+  bp -- 아니오 --> parentOwned
+  bp -- 예 --> childOwned["자식 소유<br/>세대마다 새로 로드"]
+```
+
 샘플(`sample-apps/greeting`)의 경우:
 
 | 클래스 | 설정 | 소유 |
@@ -199,11 +244,15 @@ hybrid 모드의 부모에는 MVC가 없으므로, 컨트롤러는 부모에 두
 
 `RestartClassLoader`(devtools에서 복사, child-first)를 상속하고 `loadClass`에 두 단계를 앞세운다.
 
-```
-loadClass(name)
- ├─ 삭제된 업무 클래스 목록에 있다      → ClassNotFoundException   (부모 사본으로 fallback 금지)
- ├─ ownership.isParentOwned(name)     → 부모 클래스로더에 위임     (공유 타입의 Class identity 유지)
- └─ 그 외                             → child-first: 자기 URL에서 찾고, 없으면 부모
+```mermaid
+flowchart TD
+  start(["loadClass(name)"]) --> deleted{"삭제된 업무 클래스<br/>목록에 있는가?"}
+  deleted -- 예 --> cnfe["ClassNotFoundException<br/>부모 사본으로 fallback 금지"]
+  deleted -- 아니오 --> owned{"ownership.isParentOwned(name)?"}
+  owned -- 예 --> delegate["부모 클래스로더에 위임<br/>공유 타입의 Class identity 유지"]
+  owned -- 아니오 --> own{"자기 URL에<br/>클래스 파일이 있는가?"}
+  own -- 예 --> childFirst["세대 클래스로더가 직접 로드<br/>child-first"]
+  own -- 아니오 --> fallback["부모 클래스로더에서 로드<br/>라이브러리 클래스"]
 ```
 
 - 공유 타입(`GreetingService`)까지 child-first로 로드하면 부모와 다른 `Class`가 되어 주입·캐스팅이 실패한다.
@@ -241,6 +290,33 @@ loadClass(name)
 | 5 | `GenerationManager` 생성자 | `generation/GenerationManager` | `ChangePlanner` 생성, 첫 baseline 스냅샷 촬영, drain 스케줄러 생성 |
 | 6 | `ApplicationReadyEvent` | `GenerationManager.onApplicationReady` | watch 모드면 `ChangePoller` 시작 → hybrid면 첫 세대 생성. 실패하면 예외로 기동 중단 |
 
+```mermaid
+sequenceDiagram
+  participant Boot as SpringApplication
+  participant Listener as ReloadApplicationListener
+  participant Parent as 부모 context
+  participant Filter as ReloadAutoConfigurationImportFilter
+  participant Auto as ReloadAutoConfiguration
+  participant GM as GenerationManager
+  participant Poller as ChangePoller
+
+  Boot->>Listener: ApplicationPreparedEvent (부모 refresh 전)
+  Listener->>Parent: ReloadLayout 등록, hybrid면 ReloadParentTypeExcludeFilter 등록
+  Boot->>Parent: refresh()
+  Parent->>Parent: 컴포넌트 스캔 (자식 소유 컴포넌트 제외)
+  Parent->>Filter: auto-configuration import 선별
+  Filter-->>Parent: hybrid면 DispatcherServlet / WebMvc / ErrorMvc 제외
+  Parent->>Auto: auto-configuration 처리
+  Auto->>GM: bean 생성 (ChangePlanner, 첫 baseline 스냅샷, drain 스케줄러)
+  Note over Parent: 웹 서버 기동. 첫 세대가 뜨기 전 요청은 503
+  Boot->>GM: ApplicationReadyEvent
+  GM->>Poller: 감시 시작 (watch · both 모드)
+  GM->>GM: 첫 세대 생성 (hybrid). 실패하면 기동 중단
+```
+
+표의 2·3단계는 확장점별로 나열한 것이고, 실제 실행은 그림처럼 부모 컴포넌트 스캔이 auto-configuration import
+선별보다 먼저다(Spring은 auto-configuration을 설정 클래스 파싱의 마지막에 지연 처리한다).
+
 1단계가 auto-configuration이 아니라 `ApplicationListener`인 이유는 컴포넌트 스캔이 refresh 초반에 일어나서
 auto-configuration으로는 이미 늦기 때문이다. 6단계에서 감시를 먼저 시작하는 이유는 첫 로드와 감시 시작 사이의
 변경을 놓치지 않기 위해서다.
@@ -252,16 +328,35 @@ auto-configuration으로는 이미 늦기 때문이다. 6단계에서 감시를 
 
 ### HTTP 요청
 
-```
-Tomcat ──▶ 부모의 Filter 체인 (보안 등)
-       ──▶ ReloadingDispatcherServlet.service()
-             1. manager.current() 로 현재 세대를 읽고 generation.acquire()   (retire됐으면 한 번 재시도)
-                └ 세대 없음 → 503 + Retry-After: 1
-             2. TCCL = 세대 클래스로더,  GenerationScope.enter(세대 context)
-             3. generation.dispatcher().service(request, response)
-                  └ 세대의 HandlerMapping → 컨트롤러 → 부모 bean 호출 …
-             4. TCCL/스코프 복원
-             5. 비동기가 시작되지 않았으면 generation.release()
+```mermaid
+sequenceDiagram
+  participant C as 클라이언트
+  participant T as Tomcat · 부모 Filter 체인
+  participant R as ReloadingDispatcherServlet
+  participant M as GenerationManager
+  participant G as Generation N
+  participant D as 세대 DispatcherServlet
+  participant B as 업무 컨트롤러
+  participant P as 부모 bean
+
+  C->>T: HTTP 요청
+  T->>R: service()
+  R->>M: current()
+  alt 세대 없음
+    R-->>C: 503, Retry-After 1
+  else 세대 있음
+    R->>G: acquire() (retire됐으면 한 번 재시도)
+    Note over R: TCCL = 세대 클래스로더<br/>GenerationScope.enter(세대 context)
+    R->>D: service(request, response)
+    D->>B: 세대의 HandlerMapping이 찾은 핸들러 호출
+    B->>P: 부모 bean 호출
+    P-->>B: 결과
+    B-->>D: 반환값
+    D-->>R: 응답 기록 완료
+    Note over R: TCCL · 스코프 복원
+    R->>G: release() (비동기가 시작되지 않았을 때)
+    R-->>C: 응답
+  end
 ```
 
 - **요청 하나는 끝까지 한 세대에서 처리된다.** 처리 도중 세대가 교체돼도 그 요청은 이전 세대에서 끝나고,
@@ -319,6 +414,21 @@ baseline과 candidate에서 `Entry`가 달라진 경로마다:
   부모 소유 클래스면 → **RESTART**
 - 아니면 → **RELOAD**
 
+```mermaid
+flowchart TD
+  diff(["baseline과 Entry가 달라진 경로 하나"]) --> mode{"full-restart 모드인가?"}
+  mode -- 예 --> restart["RESTART"]
+  mode -- 아니오 --> cls{"className == null?<br/>JAR · 리소스 · 설정 파일"}
+  cls -- 예 --> restart
+  cls -- 아니오 --> infra{"infrastructure?<br/>자식 클래스패스 밖 · 읽기 실패 ·<br/>인프라 애너테이션 / 인터페이스"}
+  infra -- 예 --> restart
+  infra -- 아니오 --> owner{"부모 소유 클래스인가?"}
+  owner -- 예 --> restart
+  owner -- 아니오 --> reload["RELOAD"]
+```
+
+이전·이후 `Entry` 양쪽에 같은 판정을 적용하므로, 인프라였던 클래스가 일반 클래스로 바뀐 경우도 RESTART다.
+
 하나라도 RESTART면 전체가 RESTART다(혼합 변경은 부분 적용하지 않는다). 달라진 것이 없으면 NONE.
 `reasons`에는 `business: <path>` / `infrastructure: <path>`가 쌓여 API 응답과 로그에 나온다.
 
@@ -335,6 +445,63 @@ quiet-period는 "빌드 완료"를 보장하지 않는다. 대규모 증분 빌�
 
 진입점은 `GenerationManager.reloadWithResult()` 하나이고 `synchronized`다. 감시(`onStableChange`), API
 (`ReloadTriggerServlet`), 애플리케이션 코드 어디서 호출해도 동시에 하나만 실행된다.
+
+트리거에서 결과까지의 갈림길:
+
+```mermaid
+flowchart TD
+  poller["ChangePoller<br/>quiet-period 동안<br/>안정화된 변경"] --> stable["onStableChange()"]
+  stable --> none{"plan == NONE?"}
+  none -- 예 --> noop["아무것도 하지 않음"]
+  none -- 아니오 --> entry
+  api["POST /_reload"] --> entry
+  app["애플리케이션 코드<br/>reload()"] --> entry
+  entry["reloadWithResult()<br/>synchronized"] --> snap["candidate = snapshot()<br/>plan(baseline, candidate)"]
+  snap --> needRestart{"full-restart 모드<br/>또는<br/>plan == RESTART?"}
+  needRestart -- 예 --> avail{"fullRestart<br/>.available()?"}
+  avail -- 아니오 --> r409["restart-required<br/>HTTP 409<br/>기존 세대 유지"]
+  avail -- 예 --> r202["restart-requested<br/>HTTP 202<br/>JVM 종료 후<br/>감독자가 다시 실행"]
+  needRestart -- 아니오 --> build["buildGeneration()"]
+  build --> ok{"생성 · refresh<br/>검증 모두 성공?"}
+  ok -- 예 --> r200["reload<br/>HTTP 200<br/>세대 교체<br/>baseline 전진"]
+  ok -- 아니오 --> r500["failed<br/>HTTP 500<br/>새 세대 폐기<br/>기존 세대 · baseline 유지"]
+```
+
+새 세대를 만들어 교체하는 순서(`buildGeneration`):
+
+```mermaid
+sequenceDiagram
+  participant M as GenerationManager
+  participant P as ChangePlanner
+  participant L as 새 GenerationClassLoader
+  participant X as 새 GenerationApplicationContext
+  participant I as GenerationIntegration
+  participant D as 새 DispatcherServlet
+  participant O as 이전 세대
+
+  M->>P: snapshot() → candidate
+  M->>P: plan(baseline, candidate)
+  M->>L: 생성 (호스트 로더, 자식 클래스패스, 소유권, 삭제 목록)
+  Note over M: TCCL = 새 로더
+  M->>X: 생성 후 parent · classLoader · servletContext 설정
+  M->>X: register(ChildInfrastructureConfiguration, ChildWebMvcConfig)
+  M->>I: configure(context)
+  M->>X: scan(좁힌 base-packages)
+  M->>X: refresh()
+  M->>D: init()
+  M->>I: validate(context)
+  M->>P: snapshot() 재촬영, candidate와 같은지 확인
+  alt 성공
+    M->>M: current = 새 세대, baseline = candidate
+    M->>O: retire(drainScheduler, drainTimeout)
+    Note over M: 결과 reload (HTTP 200)
+  else 예외 또는 빌드 중 파일 변경
+    M->>X: 새 세대 dispose
+    Note over M: 결과 failed (HTTP 500)<br/>기존 세대와 baseline 유지
+  end
+```
+
+같은 절차를 단계별로 풀어 쓰면 다음과 같다.
 
 ```
 reloadWithResult()
@@ -386,10 +553,77 @@ buildGeneration()
 3. dispose는 한 번만 실행된다: dispatcher `destroy()` → context `close()` → `GenerationCacheCleaner` →
    클래스로더 `close()`(JAR 핸들 해제, Windows 파일 잠금 방지) → 필드 참조 모두 `null`.
 
+세대 하나의 상태 변화:
+
+```mermaid
+stateDiagram-v2
+  state "생성 중" as Building
+  state "현재 세대" as Current
+  state "retire됨 · drain 중" as Retired
+  state "dispose됨" as Disposed
+
+  [*] --> Building: buildGeneration()
+  Building --> Current: 검증 통과 후 current 교체
+  Building --> Disposed: 생성 실패
+  Current --> Retired: 다음 세대로 교체되어 retire()
+  Current --> Disposed: 애플리케이션 종료 shutdown()
+  Retired --> Disposed: 마지막 release() 또는 drain-timeout
+  Disposed --> [*]: 클래스로더 수거 가능
+```
+
+교체 시점에 처리 중이던 요청과 그 뒤에 들어온 요청이 서로 다른 세대에서 끝나는 모습:
+
+```mermaid
+sequenceDiagram
+  participant A as 요청 A
+  participant B as 요청 B
+  participant M as GenerationManager
+  participant N as 세대 N
+  participant N1 as 세대 N+1
+
+  A->>N: acquire() 후 처리 시작
+  M->>N1: 생성 · refresh · 검증
+  M->>M: current = 세대 N+1
+  M->>N: retire()
+  Note over N: 진행 중 요청이 남아 있어 drain 대기
+  B->>N1: acquire(). 새 요청은 새 세대로
+  A->>N: release(). 마지막 요청 종료
+  N->>N: dispose (dispatcher destroy → context close → 캐시 정리 → 클래스로더 close)
+  B->>N1: release()
+```
+
 `Generation` 객체가 어딘가에 남아 있어도 dispose 후에는 클래스로더·context·dispatcher 참조를 놓으므로
 자식 클래스로더가 수거될 수 있다.
 
 ## 9. 전체 재시작 절차
+
+감독자와 애플리케이션 JVM은 요청 파일 하나로만 신호를 주고받는다.
+
+```mermaid
+sequenceDiagram
+  participant L as RestartLauncher (감독자)
+  participant F as 요청 파일 restart.request
+  participant J as 애플리케이션 JVM
+  participant S as SupervisedRestart
+
+  L->>F: 요청 파일 삭제
+  L->>J: 명령 실행 (HOT_RELOAD_RESTART_FILE 전달)
+  Note over J: 인프라 변경으로 plan == RESTART
+  J->>S: request()
+  S-->>J: 수락. API는 202 응답
+  Note over S: reload-full-restart 스레드에서 500ms 대기
+  S->>F: 요청 파일 기록
+  S->>J: context close 후 System.exit(0)
+  J-->>L: 프로세스 종료
+  L->>F: 요청 파일이 있는가?
+  alt 있음
+    L->>J: 같은 명령을 다시 실행 (새 JVM)
+  else 없음
+    Note over L: 그 exit code로 감독자도 종료
+  end
+```
+
+감독자 쪽 루프:
 
 ```
 RestartLauncher -- <명령> [인자...]
@@ -416,6 +650,21 @@ RestartLauncher -- <명령> [인자...]
 기존 세대를 유지한다. 임베딩 환경(외부 JEUS 등)은 `FullRestart` bean을 직접 제공해 재시작 동작을 대체한다.
 
 ## 10. 핵심 클래스 상세
+
+패키지 사이의 의존 방향(화살표는 "사용한다"):
+
+```mermaid
+flowchart LR
+  autoconfigure["autoconfigure<br/>부모에 엔진을 끼워 넣음"] --> generation["generation<br/>세대의 수명 주기"]
+  autoconfigure --> layout["layout<br/>소유권 · 배치"]
+  autoconfigure --> restart["restart<br/>전체 재시작"]
+  generation --> watch["watch<br/>변경 감지 · 분류"]
+  generation --> child["child<br/>매 세대의 인프라 설정"]
+  generation --> layout
+  generation --> restart
+  generation --> devtools["devtools<br/>RestartClassLoader (복사한 코드)"]
+  watch --> layout
+```
 
 ### 10.1 루트
 
