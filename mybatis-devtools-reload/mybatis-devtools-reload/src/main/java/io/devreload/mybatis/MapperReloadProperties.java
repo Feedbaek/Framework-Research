@@ -28,15 +28,15 @@ public class MapperReloadProperties {
     private List<String> watchDirs = new ArrayList<>(List.of("src/main/resources"));
 
     /**
+     * 감시 디렉터리 기준 상대 경로에 적용하는 Ant 패턴(예: mapper/**). 일치하는 XML 파일만 감시하고, 일치하는
+     * 파일이 있을 수 없는 디렉터리는 감시 대상으로 등록하지 않는다. 비어 있으면 모든 XML 파일을 감시한다.
+     */
+    private List<String> watchInclude = new ArrayList<>();
+
+    /**
      * 마지막 파일 이벤트 이후 리로드하기 전까지 기다리는 시간.
      */
     private Duration debounce = Duration.ofMillis(300);
-
-    /**
-     * 시작할 때(DevTools 재시작 포함) 소스 mapper 파일의 내용이 classpath 사본과 다르면 소스로 리로드한다.
-     * 소스는 수정했지만 build output이 갱신되지 않은 채 재시작된 경우를 처리한다.
-     */
-    private boolean syncOnStart = true;
 
     /**
      * {@link #devtoolsRestartExclude}를 {@code spring.devtools.restart.additional-exclude}에 추가해, build
@@ -65,20 +65,20 @@ public class MapperReloadProperties {
         this.watchDirs = watchDirs;
     }
 
+    public List<String> getWatchInclude() {
+        return watchInclude;
+    }
+
+    public void setWatchInclude(List<String> watchInclude) {
+        this.watchInclude = watchInclude;
+    }
+
     public Duration getDebounce() {
         return debounce;
     }
 
     public void setDebounce(Duration debounce) {
         this.debounce = debounce;
-    }
-
-    public boolean isSyncOnStart() {
-        return syncOnStart;
-    }
-
-    public void setSyncOnStart(boolean syncOnStart) {
-        this.syncOnStart = syncOnStart;
     }
 
     public boolean isDevtoolsIntegration() {

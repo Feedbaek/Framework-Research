@@ -43,7 +43,7 @@ MapperFileWatcher (데몬 스레드, debounce 후 배치 전달)
       → ConfigurationAccessor        MyBatis 내부 registry 리플렉션
 ```
 
-- **`MapperReloadService`** (`SmartLifecycle`): `appliedContent`에 마지막으로 적용한 바이트를 보관해 내용이 같으면 건너뛴다(`reload(Path)` 공개 메서드는 강제 적용). `MapperXml.read()`로 namespace만 먼저 읽고(DTD를 받아오지 않음), 그 namespace를 이미 아는 `Configuration`에만 적용한다. 아무도 모르는 namespace는 factory가 하나일 때만 등록한다. 시작 시 `syncWithClasspath`가 감시 루트 기준 상대 경로로 classpath 사본을 찾아 소스와 다르면 소스를 다시 적용한다.
+- **`MapperReloadService`** (`SmartLifecycle`): `appliedContent`에 마지막으로 적용한 바이트를 보관해 내용이 같으면 건너뛴다(`reload(Path)` 공개 메서드는 강제 적용). `MapperXml.read()`로 namespace만 먼저 읽고(DTD를 받아오지 않음), 그 namespace를 이미 아는 `Configuration`에만 적용한다. 아무도 모르는 namespace는 factory가 하나일 때만 등록한다.
 - **`MapperReloader`**: `Configuration`을 monitor로 잡고 ① namespace의 XML 정의 항목 제거 → ② `XMLMapperBuilder.parse()` → ③ 실패 시 스냅샷 복원. public이며 Spring 없이 단독으로 쓸 수 있다.
 - **`ConfigurationAccessor`**: 런타임 클래스부터 상위로 필드를 찾으므로 registry를 재선언한 하위 클래스(MyBatis-Plus `MybatisConfiguration`)도 처리된다.
 
@@ -55,6 +55,8 @@ MapperFileWatcher (데몬 스레드, debounce 후 배치 전달)
 - **`IncompleteTracker`**: 파싱 후 MyBatis의 incomplete 큐에 새 항목이 남으면(없는 `resultMap`, `cache-ref`, include 참조) 예외 없이 끝났더라도 리로드를 거부하고 롤백한다.
 - **클래스로더**: 서비스는 컨텍스트 bean이라 DevTools의 restart classloader에 속하고, restart마다 watcher 스레드와 함께 닫히고 새로 만들어진다. 파싱 중에는 TCCL을 애플리케이션 classloader로 바꿔 `resultType`이 restart classloader 기준으로 해석되게 한다. static 캐시나 컨텍스트 밖에서 사는 스레드를 추가하면 이전 classloader가 누수된다.
 - **감시 대상은 소스 디렉터리**(`src/main/resources`)이고 상대 경로는 `user.dir` 기준이다. `bootRun`은 작업 디렉터리가 모듈이라 기본값이 맞지만, 다른 작업 디렉터리에서 실행하면 `watch-dirs`를 지정해야 한다.
+- **감시 범위**: `watch-dirs`를 하위 디렉터리로 옮기거나 `watch-include` 패턴(`MapperPathFilter`)으로 좁힌다. 패턴에 일치하는 파일이 있을 수 없는 디렉터리는 watcher에 등록하지 않는다. `reload(Path)`에는 필터를 적용하지 않는다.
+- **재시작 후에는 소스와 비교하지 않는다**: 재시작을 일으키는 빌드가 리소스도 함께 복사한다고 전제한다(Eclipse·VS Code 자동 빌드, IntelliJ Build Project). 클래스만 컴파일하는 경우(IntelliJ 파일 단위 Recompile)는 의도적으로 배제했고, 그래서 시작 시 classpath 사본과 비교하던 `sync-on-start`를 제거했다.
 
 ### 의존성 범위
 

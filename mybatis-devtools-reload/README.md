@@ -34,8 +34,8 @@ mybatis-reload:
 |---|---|---|
 | `enabled` | `false` | 기능 활성화 |
 | `watch-dirs` | `[src/main/resources]` | 감시할 **소스** 디렉터리. 상대 경로는 작업 디렉터리 기준 |
+| `watch-include` | `[]` | `watch-dirs` 기준 상대 Ant 패턴(예: `mapper/**`). 일치하는 XML만 감시하며, 비어 있으면 전체 |
 | `debounce` | `300ms` | 마지막 파일 이벤트 후 대기 시간 |
-| `sync-on-start` | `true` | 시작(재시작 포함) 시 소스와 classpath 사본이 다르면 소스로 다시 적용 |
 | `devtools-integration` | `true` | 아래 패턴을 `spring.devtools.restart.additional-exclude`에 추가 |
 | `devtools-restart-exclude` | `[mapper/**, mappers/**, **/*Mapper.xml]` | DevTools 재시작을 일으키지 않을 classpath 상대 패턴 |
 
@@ -62,8 +62,19 @@ curl localhost:8080/users   # 재시작 없이 새 SQL 반영
    - watcher 스레드도 컨텍스트 종료 시 정리되므로, 이전 restart classloader를 붙잡지 않습니다.
 3. **소스 디렉터리 감시**
    - build output이 아니라 `src/main/resources`를 감시하므로 저장만 하면 반영됩니다.
-   - 소스만 수정한 상태에서 Java 변경으로 재시작이 일어나면 MyBatis는 build output의 오래된 XML을 파싱합니다.
-   - 이 경우 `sync-on-start`가 소스 버전으로 다시 맞춥니다.
+   - 재시작하면 MyBatis는 build output의 XML을 다시 읽습니다. 재시작을 일으킨 빌드가 리소스도 함께 복사하므로 소스와 같은 내용입니다(예외는 "제약" 참고).
+4. **감시 범위 좁히기** (`watch-dirs`, `watch-include`)
+   - 감시 비용은 감시 디렉터리 아래의 디렉터리 수에 비례합니다. 리소스 트리가 크면 범위를 좁힙니다.
+   - mapper가 한 디렉터리에 모여 있으면 `watch-dirs`를 그 디렉터리로 지정하면 됩니다.
+   - 한 루트 아래 여러 디렉터리나 파일 이름 규칙으로 고르려면 `watch-include` 패턴을 씁니다. 일치하는 파일이 있을 수 없는 디렉터리는 감시 대상으로 등록하지 않습니다.
+   - `mapper/**`처럼 디렉터리로 시작하는 패턴이어야 등록 수가 줄어듭니다. `**/*Mapper.xml`처럼 `**`로 시작하면 파일만 걸러지고 디렉터리는 모두 등록됩니다.
+
+```yaml
+mybatis-reload:
+  enabled: true
+  watch-dirs: [src/main/resources]
+  watch-include: [mapper/**, sql/**]   # watch-dirs 기준 상대 패턴
+```
 
 ### 리로드 (`MapperReloader`)
 
@@ -94,6 +105,11 @@ curl localhost:8080/users   # 재시작 없이 새 SQL 반영
   - registry가 `HashMap`이라서, 리로드하는 순간 다른 스레드의 쿼리가 statement를 잠깐 못 찾을 수 있습니다.
   - 리로드 자체는 `Configuration` 단위로 직렬화됩니다.
 - **mapper 인터페이스에 메서드를 추가하면** Java 변경이므로 DevTools 재시작으로 처리됩니다.
+- **재시작을 일으키는 빌드는 리소스도 함께 복사해야 합니다.**
+  - 재시작 후 MyBatis는 build output의 XML을 읽고, 이 라이브러리는 그것을 소스와 다시 비교하지 않습니다.
+  - Eclipse·VS Code의 자동 빌드, IntelliJ의 Build Project, Gradle `classes` 태스크는 리소스를 함께 복사하므로 해당하지 않습니다.
+  - **클래스만 컴파일하는 경우는 지원 범위에서 제외합니다.** IntelliJ에서 파일 하나만 Recompile하거나 `compileJava`만 실행하는 경우입니다.
+  - 이때는 저장만 해 둔 XML 변경이 재시작 후 build output의 예전 SQL로 돌아갑니다. 전체 빌드를 실행하면 맞춰집니다.
 - **namespace 간 참조**: 다른 XML이 `<include refid="other.ns.x">`로 참조하는 fragment를 바꾸면, 참조하는 쪽 XML도 저장(리로드)해야 반영됩니다.
   - statement는 파싱 시점에 include를 펼쳐서 보관하기 때문입니다.
 - **MyBatis 내부 필드를 리플렉션으로 다룹니다.**
@@ -103,5 +119,3 @@ curl localhost:8080/users   # 재시작 없이 새 SQL 반영
   - 필드 조회를 하위 클래스부터 하므로 `MybatisConfiguration`은 처리됩니다.
   - 자동 주입 CRUD 유지도 설계상 동작해야 하지만 아직 검증하지 않았습니다.
   - 참고로 MyBatis-Plus 3.1.1 이상은 DevTools 사용 시 `TableInfo` 캐시 문제가 알려져 있습니다(공식 FAQ).
-- **Gradle 리소스 필터링**(`processResources`의 `expand` 등)을 쓰면 소스와 classpath 사본이 항상 달라집니다.
-  - 그래서 `sync-on-start`가 매번 동작합니다. 이 경우 `sync-on-start: false`로 끄세요.

@@ -16,6 +16,7 @@ import java.nio.file.WatchKey;
 import java.nio.file.WatchService;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -23,7 +24,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
-import java.util.stream.Stream;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -31,6 +31,9 @@ import org.apache.commons.logging.LogFactory;
 /**
  * 디렉터리 트리의 {@code *.xml} 변경을 감시하고, debounce 시간 동안 파일에 변화가 없으면 변경분을 묶어서
  * 알린다(에디터는 파일 하나를 여러 단계에 걸쳐 쓰는 경우가 많다).
+ *
+ * <p>{@link MapperPathFilter}를 통과하는 파일만 알리고, 그런 파일이 있을 수 없는 디렉터리는 등록하지 않는다.
+ * 감시 비용이 디렉터리 수에 비례하므로, 리소스 트리가 큰 프로젝트에서 등록 수를 줄이기 위해서다.
  *
  * <p>인스턴스마다 데몬 스레드 하나를 쓴다. {@link #close()}가 스레드를 멈춘다. reload 서비스는 자신의
  * 애플리케이션 컨텍스트가 닫힐 때 watcher를 닫는데, DevTools는 재시작할 때마다 컨텍스트를 닫으므로 스레드가
@@ -41,17 +44,19 @@ final class MapperFileWatcher implements Closeable {
     private static final Log logger = LogFactory.getLog(MapperFileWatcher.class);
 
     private final List<Path> roots;
+    private final MapperPathFilter filter;
     private final long debounceNanos;
     private final Consumer<Set<Path>> listener;
     private final ClassLoader contextClassLoader;
-    private final Map<WatchKey, Path> keys = new HashMap<>();
+    private final Map<WatchKey, WatchedDir> keys = new HashMap<>();
 
     private volatile WatchService watchService;
     private volatile Thread thread;
 
-    MapperFileWatcher(List<Path> roots, Duration debounce, ClassLoader contextClassLoader,
-            Consumer<Set<Path>> listener) {
+    MapperFileWatcher(List<Path> roots, MapperPathFilter filter, Duration debounce,
+            ClassLoader contextClassLoader, Consumer<Set<Path>> listener) {
         this.roots = List.copyOf(roots);
+        this.filter = filter;
         this.debounceNanos = debounce.toNanos();
         this.contextClassLoader = contextClassLoader;
         this.listener = listener;
@@ -63,7 +68,7 @@ final class MapperFileWatcher implements Closeable {
         }
         watchService = roots.get(0).getFileSystem().newWatchService();
         for (Path root : roots) {
-            registerTree(root);
+            registerTree(root, root);
         }
         thread = new Thread(this::run, "mybatis-mapper-watcher");
         thread.setDaemon(true);
@@ -114,22 +119,21 @@ final class MapperFileWatcher implements Closeable {
     }
 
     private void collect(WatchKey key, Set<Path> pending) {
-        Path dir = keys.get(key);
+        WatchedDir watched = keys.get(key);
         for (WatchEvent<?> event : key.pollEvents()) {
-            if (event.kind() == OVERFLOW || dir == null) {
+            if (event.kind() == OVERFLOW || watched == null) {
                 continue;
             }
-            Path changed = dir.resolve((Path) event.context());
+            Path root = watched.root();
+            Path changed = watched.dir().resolve((Path) event.context());
             if (event.kind() == ENTRY_CREATE && Files.isDirectory(changed)) {
                 try {
-                    registerTree(changed);
-                    try (Stream<Path> files = Files.walk(changed)) {
-                        files.filter(MapperFileWatcher::isXmlFile).forEach(pending::add);
-                    }
+                    registerTree(root, changed);
+                    pending.addAll(findXmlFiles(root, changed, filter));
                 } catch (IOException ex) {
                     logger.warn("Cannot watch new directory " + changed + ": " + ex.getMessage());
                 }
-            } else if (isXmlFile(changed)) {
+            } else if (isXmlFile(changed) && filter.includes(root, changed)) {
                 pending.add(changed);
             }
         }
@@ -146,14 +150,43 @@ final class MapperFileWatcher implements Closeable {
         }
     }
 
-    private void registerTree(Path root) throws IOException {
-        Files.walkFileTree(root, new SimpleFileVisitor<>() {
+    private void registerTree(Path root, Path start) throws IOException {
+        Files.walkFileTree(start, new SimpleFileVisitor<>() {
             @Override
             public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
-                keys.put(dir.register(watchService, ENTRY_CREATE, ENTRY_MODIFY), dir);
+                if (!filter.mayInclude(root, dir)) {
+                    return FileVisitResult.SKIP_SUBTREE;
+                }
+                keys.put(dir.register(watchService, ENTRY_CREATE, ENTRY_MODIFY), new WatchedDir(root, dir));
                 return FileVisitResult.CONTINUE;
             }
         });
+    }
+
+    /**
+     * {@code start} 아래에서 filter를 통과하는 XML 파일을 찾는다. 통과할 파일이 있을 수 없는 디렉터리에는 들어가지
+     * 않는다.
+     */
+    static List<Path> findXmlFiles(Path root, Path start, MapperPathFilter filter) throws IOException {
+        List<Path> files = new ArrayList<>();
+        Files.walkFileTree(start, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                return filter.mayInclude(root, dir) ? FileVisitResult.CONTINUE : FileVisitResult.SKIP_SUBTREE;
+            }
+
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                if (isXmlFile(file) && filter.includes(root, file)) {
+                    files.add(file);
+                }
+                return FileVisitResult.CONTINUE;
+            }
+        });
+        return files;
+    }
+
+    private record WatchedDir(Path root, Path dir) {
     }
 
     static boolean isXmlFile(Path path) {

@@ -1,9 +1,6 @@
 package io.devreload.mybatis;
 
-import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
-import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -13,7 +10,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Stream;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -28,6 +24,10 @@ import org.springframework.util.ClassUtils;
  *
  * <p>애플리케이션 컨텍스트 안에 있으므로, DevTools를 쓰면 restart 클래스 로더가 생성하고 재시작할 때마다
  * 자신이 갱신하는 {@code SqlSessionFactory}와 함께 중지되고 다시 생성된다.
+ *
+ * <p>재시작한 뒤에는 MyBatis가 classpath(build output)에서 읽은 XML을 그대로 쓰고, 소스와 다시 비교하지 않는다.
+ * 재시작을 일으키는 빌드가 리소스도 함께 복사한다고 전제하기 때문이다. 클래스만 컴파일하고 리소스는 복사하지 않는
+ * 빌드(IntelliJ의 파일 단위 Recompile 등)는 지원 범위에서 제외했다.
  */
 public class MapperReloadService implements SmartLifecycle, BeanClassLoaderAware {
 
@@ -69,15 +69,14 @@ public class MapperReloadService implements SmartLifecycle, BeanClassLoaderAware
             logger.warn("MyBatis mapper reload disabled: no SqlSessionFactory found");
             return;
         }
-        if (properties.isSyncOnStart()) {
-            syncWithClasspath(roots);
-        }
-        MapperFileWatcher newWatcher = new MapperFileWatcher(roots, properties.getDebounce(), classLoader,
+        MapperPathFilter filter = new MapperPathFilter(properties.getWatchInclude());
+        MapperFileWatcher newWatcher = new MapperFileWatcher(roots, filter, properties.getDebounce(), classLoader,
                 this::onChange);
         try {
             newWatcher.start();
             watcher = newWatcher;
-            logger.info("Watching MyBatis mapper XML in " + roots);
+            logger.info("Watching MyBatis mapper XML in " + roots
+                    + (filter.patterns().isEmpty() ? "" : " (include: " + filter.patterns() + ")"));
         } catch (IOException ex) {
             newWatcher.close();
             logger.warn("MyBatis mapper reload disabled: cannot watch " + roots + ": " + ex.getMessage());
@@ -100,7 +99,8 @@ public class MapperReloadService implements SmartLifecycle, BeanClassLoaderAware
     }
 
     /**
-     * mapper 파일 하나를 지금 리로드한다. 수동으로 호출할 때(엔드포인트, 테스트) 쓰도록 공개했다.
+     * mapper 파일 하나를 지금 리로드한다. 수동으로 호출할 때(엔드포인트, 테스트) 쓰도록 공개했다. 호출자가 파일을
+     * 직접 지정하므로 {@code watch-include} 패턴은 적용하지 않는다.
      *
      * @return 파일이 하나 이상의 configuration에 적용됐으면 {@code true}
      */
@@ -166,64 +166,6 @@ public class MapperReloadService implements SmartLifecycle, BeanClassLoaderAware
             return all; // 새 mapper 파일. 등록할 곳이 하나뿐이다
         }
         return knowing;
-    }
-
-    /**
-     * mapper의 classpath 사본은 오래된 것일 수 있다. 소스를 저장해서 리로드까지 됐지만 build output은 갱신되지
-     * 않았고, 그 상태에서 관련 없는 클래스 변경으로 DevTools가 재시작하면 MyBatis는 오래된 사본을 파싱한다.
-     * 그런 경우 소스 버전을 다시 적용한다.
-     */
-    private void syncWithClasspath(List<Path> roots) {
-        int synced = 0;
-        for (Path root : roots) {
-            List<Path> files;
-            try (Stream<Path> walk = Files.walk(root)) {
-                files = walk.filter(MapperFileWatcher::isXmlFile).toList();
-            } catch (IOException ex) {
-                logger.warn("Cannot scan " + root + ": " + ex.getMessage());
-                continue;
-            }
-            for (Path file : files) {
-                Path normalized = file.toAbsolutePath().normalize();
-                byte[] source = readStable(normalized);
-                byte[] onClasspath = readClasspathCopy(root, file);
-                if (source == null || onClasspath == null) {
-                    continue;
-                }
-                if (Arrays.equals(source, onClasspath)) {
-                    appliedContent.put(normalized, source);
-                    continue;
-                }
-                if (isLoadedMapper(source) && apply(normalized, false)) {
-                    synced++;
-                }
-            }
-        }
-        if (synced > 0) {
-            logger.info("Applied " + synced + " mapper file(s) whose source differs from the classpath copy");
-        }
-    }
-
-    private boolean isLoadedMapper(byte[] content) {
-        try {
-            MapperXml xml = MapperXml.read(content);
-            return xml != null && reloaders.stream().anyMatch(r -> r.knows(xml.namespace()));
-        } catch (Exception ex) {
-            return false;
-        }
-    }
-
-    private byte[] readClasspathCopy(Path root, Path file) {
-        String relative = root.relativize(file).toString().replace(File.separatorChar, '/');
-        URL url = classLoader.getResource(relative);
-        if (url == null) {
-            return null;
-        }
-        try (InputStream in = url.openStream()) {
-            return in.readAllBytes();
-        } catch (IOException ex) {
-            return null;
-        }
     }
 
     /**
