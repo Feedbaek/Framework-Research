@@ -85,7 +85,7 @@ flowchart TB
 | `MapperReloader` | `Configuration` 하나에서 namespace를 교체 | Spring 없이 단독으로도 쓸 수 있습니다. |
 | `ConfigurationRegistries` | MyBatis 내부 registry를 리플렉션으로 꺼냄 | 하위 클래스부터 필드를 찾아 MyBatis-Plus의 `MybatisConfiguration`도 처리합니다. |
 | `MapperPathFilter` | `watch-include` 패턴으로 감시할 파일과 디렉터리를 거름 | 감시 디렉터리 기준 상대 경로에 Ant 패턴을 적용합니다. |
-| `MapperXml` | XML에서 namespace와 `<cache>` 선언 여부만 먼저 읽음 | DTD를 내려받지 않아 빠릅니다. |
+| `MapperXmlSummary` | XML에서 namespace와 `<cache>` 선언 여부만 먼저 읽음 | DTD를 내려받지 않아 빠릅니다. |
 
 진입점은 auto-configuration(`MapperReloadAutoConfiguration`) 하나이며, 여기서 `MapperReloadService`를 등록합니다.
 
@@ -115,7 +115,7 @@ flowchart TD
 2. **건너뛸지 판단** (`MapperReloadService`)
    - 파일 내용이 마지막으로 적용한 것과 같으면 아무것도 하지 않습니다.
    - 비어 있는 파일은 쓰는 중일 수 있어 한 번 더 읽어 봅니다.
-3. **namespace 확인** (`MapperXml`)
+3. **namespace 확인** (`MapperXmlSummary`)
    - XML에서 `<mapper namespace>` 값만 먼저 읽습니다. mapper가 아닌 XML은 여기서 무시합니다.
 4. **대상 결정**
    - 그 namespace를 이미 가진 `Configuration`을 고릅니다.

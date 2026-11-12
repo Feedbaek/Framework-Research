@@ -83,19 +83,19 @@ public final class MapperReloader {
      * @throws MapperReloadException XML을 적용할 수 없는 경우. 이전 상태는 복원된다
      */
     public int reload(String resource, byte[] content) {
-        MapperXml xml;
+        MapperXmlSummary summary;
         try {
-            xml = MapperXml.read(content);
+            summary = MapperXmlSummary.probe(content);
         } catch (Exception ex) {
             throw new MapperReloadException("Not well-formed XML: " + resource, ex);
         }
-        if (xml == null) {
+        if (summary == null) {
             throw new MapperReloadException("Not a MyBatis mapper XML: " + resource, null);
         }
 
         Configuration configuration = registries.configuration();
         synchronized (configuration) {
-            Snapshot removed = removeNamespace(xml);
+            Snapshot removed = removeNamespace(summary);
             registries.loadedResources().remove(resource);
             IncompleteTracker incomplete = new IncompleteTracker(configuration);
 
@@ -105,11 +105,11 @@ public final class MapperReloader {
             try {
                 new XMLMapperBuilder(new ByteArrayInputStream(content), configuration, resource,
                         configuration.getSqlFragments()).parse();
-                incomplete.assertNothingAdded(xml.namespace());
-                return countXmlStatements(xml.namespace() + ".");
+                incomplete.assertNothingAdded(summary.namespace());
+                return countXmlStatements(summary.namespace() + ".");
             } catch (RuntimeException ex) {
                 incomplete.discardAdded();
-                removeNamespace(xml);
+                removeNamespace(summary);
                 removed.restore();
                 registries.loadedResources().remove(resource);
                 throw new MapperReloadException("Failed to reload " + resource + " (previous SQL kept): "
@@ -121,8 +121,8 @@ public final class MapperReloader {
         }
     }
 
-    private Snapshot removeNamespace(MapperXml xml) {
-        String prefix = xml.namespace() + ".";
+    private Snapshot removeNamespace(MapperXmlSummary summary) {
+        String prefix = summary.namespace() + ".";
 
         Map<String, Object> statements = removeByIdentity(registries.mappedStatements(),
                 (key, value) -> key.startsWith(prefix) && value instanceof MappedStatement ms && !isAnnotation(ms));
@@ -154,8 +154,8 @@ public final class MapperReloader {
         Map<String, Object> sqlFragments = removeByIdentity(registries.sqlFragments(),
                 (key, value) -> key.startsWith(prefix));
 
-        Map<String, Object> caches = xml.declaresCache()
-                ? removeByIdentity(registries.caches(), (key, value) -> key.equals(xml.namespace()))
+        Map<String, Object> caches = summary.declaresCache()
+                ? removeByIdentity(registries.caches(), (key, value) -> key.equals(summary.namespace()))
                 : Map.of();
 
         return new Snapshot(statements, resultMaps, parameterMaps, keyGenerators, sqlFragments, caches);

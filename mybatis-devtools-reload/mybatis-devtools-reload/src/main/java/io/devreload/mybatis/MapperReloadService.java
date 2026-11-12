@@ -130,20 +130,20 @@ public class MapperReloadService implements SmartLifecycle, BeanClassLoaderAware
             return;
         }
 
-        MapperXml xml;
+        MapperXmlSummary summary;
         try {
-            xml = MapperXml.read(content);
+            summary = MapperXmlSummary.probe(content);
         } catch (Exception ex) {
             logger.warn("Skipped " + file + ": not well-formed XML (" + ex.getMessage() + ")");
             return;
         }
-        if (xml == null) {
+        if (summary == null) {
             return; // mapper가 아닌 다른 XML 파일
         }
 
-        List<MapperReloader> targets = targetsFor(xml.namespace());
+        List<MapperReloader> targets = targetsFor(summary.namespace());
         if (targets.isEmpty()) {
-            logger.info("Skipped " + file + ": namespace '" + xml.namespace()
+            logger.info("Skipped " + file + ": namespace '" + summary.namespace()
                     + "' is not loaded by any SqlSessionFactory (several factories exist, cannot pick one)");
             return;
         }
@@ -152,7 +152,7 @@ public class MapperReloadService implements SmartLifecycle, BeanClassLoaderAware
         for (MapperReloader reloader : targets) {
             try {
                 int statements = reloader.reload("file [" + file + "]", content);
-                logger.info("Reloaded mapper " + xml.namespace() + " (" + statements + " statements) from "
+                logger.info("Reloaded mapper " + summary.namespace() + " (" + statements + " statements) from "
                         + file.getFileName());
             } catch (MapperReloadException ex) {
                 allApplied = false;

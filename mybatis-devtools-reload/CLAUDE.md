@@ -40,7 +40,7 @@ MapperFileWatcher (데몬 스레드, debounce 후 배치 전달)
       → ConfigurationRegistries      MyBatis 내부 registry 리플렉션
 ```
 
-- **`MapperReloadService`** (`SmartLifecycle`): `appliedContent`에 마지막으로 적용한 바이트를 보관해 내용이 같으면 건너뛴다(`reload(Path)` 공개 메서드는 강제 적용). `MapperXml.read()`로 namespace만 먼저 읽고(DTD를 받아오지 않음), 그 namespace를 이미 아는 `Configuration`에만 적용한다. 아무도 모르는 namespace는 factory가 하나일 때만 등록한다.
+- **`MapperReloadService`** (`SmartLifecycle`): `appliedContent`에 마지막으로 적용한 바이트를 보관해 내용이 같으면 건너뛴다(`reload(Path)` 공개 메서드는 강제 적용). `MapperXmlSummary.probe()`로 namespace만 먼저 읽고(DTD를 받아오지 않음), 그 namespace를 이미 아는 `Configuration`에만 적용한다. 아무도 모르는 namespace는 factory가 하나일 때만 등록한다.
 - **`MapperReloader`**: `Configuration`을 monitor로 잡고 ① namespace의 XML 정의 항목 제거 → ② `XMLMapperBuilder.parse()` → ③ 실패 시 스냅샷 복원. public이며 Spring 없이 단독으로 쓸 수 있다.
 - **`ConfigurationRegistries`**: 런타임 클래스부터 상위로 필드를 찾으므로 registry를 재선언한 하위 클래스(MyBatis-Plus `MybatisConfiguration`)도 처리된다.
 

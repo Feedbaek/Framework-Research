@@ -126,6 +126,27 @@ class MapperReloaderTest {
     }
 
     @Test
+    void namespaceWithSurroundingSpacesIsReplacedNotDuplicated() {
+        String ns = " padded.Mapper "; // MyBatis는 trim하지 않으므로 키는 " padded.Mapper .findOne"
+        String xml = """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+                <mapper namespace="%s">
+                  <select id="findOne" resultType="string">SELECT name FROM users WHERE id = %d</select>
+                </mapper>
+                """;
+        String resource = "file [/src/main/resources/mapper/Padded.xml]";
+        load("file [/build/resources/main/mapper/Padded.xml]", xml.formatted(ns, 1));
+
+        int count = reloader.reload(resource, bytes(xml.formatted(ns, 2)));
+
+        assertThat(count).isEqualTo(1);
+        try (SqlSession session = factory.openSession()) {
+            assertThat(session.<String>selectOne(ns + ".findOne")).isEqualTo("lee");
+        }
+    }
+
+    @Test
     void knowsLoadedNamespaceOnly() {
         assertThat(reloader.knows(NS)).isTrue();
         assertThat(reloader.knows("com.example.Unknown")).isFalse();
