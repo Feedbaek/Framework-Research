@@ -3,6 +3,9 @@ spring:
     url: jdbc:h2:mem:sample;DB_CLOSE_DELAY=-1
     username: sa
     password:
+  devtools:
+    restart:
+      additional-exclude: mapper/**              # mapper XML 변경으로는 DevTools가 재시작하지 않게 함
 
 mybatis:
   mapper-locations: classpath:mapper/**/*.xml
@@ -11,7 +14,6 @@ mybatis-reload:
   enabled: true
   # watch-dirs: [src/main/resources]          # 기본값. 상대 경로는 작업 디렉터리 기준
   # watch-include: [mapper/**]                # 기본값은 비어 있음(전체). watch-dirs 기준 상대 패턴
-  # devtools-restart-exclude: [mapper/**]     # 기본값: mapper/**, mappers/**, **/*Mapper.xml
 
 logging:
   level:

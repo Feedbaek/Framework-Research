@@ -25,14 +25,11 @@ lint/포맷터 설정은 없다. 테스트는 `mybatis-devtools-reload` 모듈�
 
 ## 아키텍처
 
-### 진입점이 두 개다
+### 진입점
 
-| 등록 파일 | 클래스 | 실행 시점 |
-|---|---|---|
-| `META-INF/spring.factories` | `MapperReloadDevToolsEnvironmentPostProcessor` | 컨텍스트 생성 전, DevTools restart마다 |
-| `META-INF/spring/...AutoConfiguration.imports` | `MapperReloadAutoConfiguration` → `MapperReloadService` | `MybatisAutoConfiguration` 이후 |
+`META-INF/spring/...AutoConfiguration.imports`로 등록한 `MapperReloadAutoConfiguration` 하나뿐이며, `MybatisAutoConfiguration` 이후에 `MapperReloadService`를 만든다. 속성을 추가하거나 기본값을 바꾸면 `MapperReloadProperties`와 README 속성 표를 함께 고친다.
 
-EnvironmentPostProcessor는 bean이 생기기 전에 돌기 때문에 `MapperReloadProperties`를 쓰지 못하고 `Binder`로 `mybatis-reload.*`를 직접 읽는다. 그래서 **기본값이 두 군데에 있다**: `enabled`/`devtools-integration`의 기본값은 properties 클래스와 post processor의 `orElse(...)` 양쪽에 있고, exclude 패턴만 `DEFAULT_RESTART_EXCLUDE` 상수를 공유한다. 속성을 추가하거나 기본값을 바꾸면 두 클래스와 README 속성 표를 함께 고쳐야 한다.
+DevTools restart exclude(`spring.devtools.restart.additional-exclude`)는 라이브러리가 설정하지 않고 사용하는 애플리케이션이 직접 지정한다(README "사용법", `sample-app`의 `application.yml`). 이전에 이 일을 하던 `EnvironmentPostProcessor`는 제거했다.
 
 ### 리로드 흐름
 
@@ -40,12 +37,12 @@ EnvironmentPostProcessor는 bean이 생기기 전에 돌기 때문에 `MapperRel
 MapperFileWatcher (데몬 스레드, debounce 후 배치 전달)
   → MapperReloadService.apply()      파일 → 대상 Configuration 결정
     → MapperReloader.reload()        Configuration 하나에서 namespace 교체
-      → ConfigurationAccessor        MyBatis 내부 registry 리플렉션
+      → ConfigurationRegistries      MyBatis 내부 registry 리플렉션
 ```
 
 - **`MapperReloadService`** (`SmartLifecycle`): `appliedContent`에 마지막으로 적용한 바이트를 보관해 내용이 같으면 건너뛴다(`reload(Path)` 공개 메서드는 강제 적용). `MapperXml.read()`로 namespace만 먼저 읽고(DTD를 받아오지 않음), 그 namespace를 이미 아는 `Configuration`에만 적용한다. 아무도 모르는 namespace는 factory가 하나일 때만 등록한다.
 - **`MapperReloader`**: `Configuration`을 monitor로 잡고 ① namespace의 XML 정의 항목 제거 → ② `XMLMapperBuilder.parse()` → ③ 실패 시 스냅샷 복원. public이며 Spring 없이 단독으로 쓸 수 있다.
-- **`ConfigurationAccessor`**: 런타임 클래스부터 상위로 필드를 찾으므로 registry를 재선언한 하위 클래스(MyBatis-Plus `MybatisConfiguration`)도 처리된다.
+- **`ConfigurationRegistries`**: 런타임 클래스부터 상위로 필드를 찾으므로 registry를 재선언한 하위 클래스(MyBatis-Plus `MybatisConfiguration`)도 처리된다.
 
 ### 깨지기 쉬운 전제 (수정 전에 확인)
 
@@ -60,7 +57,7 @@ MapperFileWatcher (데몬 스레드, debounce 후 배치 전달)
 
 ### 의존성 범위
 
-라이브러리는 Spring Boot autoconfigure와 MyBatis starter를 `compileOnly`로만 의존한다(사용하는 애플리케이션이 제공). 그래서 로깅은 `org.apache.commons.logging`(spring-jcl)을 쓰고, DevTools는 클래스가 아니라 속성 이름(`spring.devtools.restart.additional-exclude`)만 참조한다. 새 런타임 의존성을 추가하지 말 것.
+라이브러리는 Spring Boot autoconfigure와 MyBatis starter를 `compileOnly`로만 의존한다(사용하는 애플리케이션이 제공). 그래서 로깅은 `org.apache.commons.logging`(spring-jcl)을 쓰고, DevTools는 전혀 참조하지 않는다. 새 런타임 의존성을 추가하지 말 것.
 
 ## 테스트 구성
 

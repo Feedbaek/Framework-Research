@@ -18,11 +18,11 @@ import org.apache.ibatis.session.Configuration;
  * {@code removeIf}, {@code putAll}({@code HashMap.putVal}을 직접 호출한다)은 중복 키 검사를 거치지 않는다.
  * reloader는 이 점을 이용해 항목을 제거하고 스냅샷을 그대로 복원한다.
  */
-final class ConfigurationAccessor {
+final class ConfigurationRegistries {
 
     private final Configuration configuration;
 
-    ConfigurationAccessor(Configuration configuration) {
+    ConfigurationRegistries(Configuration configuration) {
         this.configuration = configuration;
     }
 

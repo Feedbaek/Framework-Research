@@ -35,8 +35,8 @@ public class MapperReloadService implements SmartLifecycle, BeanClassLoaderAware
 
     private final MapperReloadProperties properties;
     private final ObjectProvider<SqlSessionFactory> sqlSessionFactories;
-    private final Map<Path, byte[]> appliedContent = new ConcurrentHashMap<>();
 
+    private final Map<Path, byte[]> appliedContent = new ConcurrentHashMap<>();
     private ClassLoader classLoader = ClassUtils.getDefaultClassLoader();
     private volatile List<MapperReloader> reloaders = List.of();
     private volatile MapperFileWatcher watcher;
@@ -53,6 +53,13 @@ public class MapperReloadService implements SmartLifecycle, BeanClassLoaderAware
         this.classLoader = classLoader;
     }
 
+    /**
+     * {@link MapperFileWatcher}를 시작한다. 감시할 디렉터리가 하나도 없거나 {@link SqlSessionFactory}가 없으면
+     * 경고만 남기고 시작하지 않는다.
+     *
+     * <p>{@code mybatis-reload.enabled}는 여기서 확인하지 않는다. {@code true}가 아니면
+     * {@link MapperReloadAutoConfiguration}의 {@code @ConditionalOnProperty} 때문에 이 bean 자체가 등록되지 않는다.
+     */
     @Override
     public void start() {
         running = true;
@@ -99,26 +106,28 @@ public class MapperReloadService implements SmartLifecycle, BeanClassLoaderAware
     }
 
     /**
-     * mapper 파일 하나를 지금 리로드한다. 수동으로 호출할 때(엔드포인트, 테스트) 쓰도록 공개했다. 호출자가 파일을
-     * 직접 지정하므로 {@code watch-include} 패턴은 적용하지 않는다.
+     * 파일이 변경되었을 때 호출된다.
      *
-     * @return 파일이 하나 이상의 configuration에 적용됐으면 {@code true}
+     * @param files 변경된 파일의 경로. 여러 파일이 한 번에 변경될 수 있다.
      */
-    public boolean reload(Path file) {
-        return apply(file.toAbsolutePath().normalize(), true);
-    }
-
     private void onChange(Set<Path> files) {
-        files.stream().sorted().forEach(file -> apply(file.toAbsolutePath().normalize(), false));
+        files.stream().sorted().forEach(
+                file -> apply(file.toAbsolutePath().normalize()));
     }
 
-    private boolean apply(Path file, boolean force) {
+    /**
+     * 지정된 파일을 읽어, 이전에 적용한 내용과 다르면 {@link MapperReloader}를 통해 컨텍스트의 모든 {@link SqlSessionFactory}에 적용한다.
+     * 적용에 성공하면 {@link #appliedContent}를 갱신한다.
+     *
+     * @param file 적용할 파일의 절대 경로.
+     */
+    private void apply(Path file) {
         byte[] content = readStable(file);
         if (content == null || content.length == 0) {
-            return false;
+            return;
         }
-        if (!force && Arrays.equals(appliedContent.get(file), content)) {
-            return false;
+        if (Arrays.equals(appliedContent.get(file), content)) {
+            return;
         }
 
         MapperXml xml;
@@ -126,23 +135,23 @@ public class MapperReloadService implements SmartLifecycle, BeanClassLoaderAware
             xml = MapperXml.read(content);
         } catch (Exception ex) {
             logger.warn("Skipped " + file + ": not well-formed XML (" + ex.getMessage() + ")");
-            return false;
+            return;
         }
         if (xml == null) {
-            return false; // mapper가 아닌 다른 XML 파일
+            return; // mapper가 아닌 다른 XML 파일
         }
 
         List<MapperReloader> targets = targetsFor(xml.namespace());
         if (targets.isEmpty()) {
             logger.info("Skipped " + file + ": namespace '" + xml.namespace()
                     + "' is not loaded by any SqlSessionFactory (several factories exist, cannot pick one)");
-            return false;
+            return;
         }
 
         boolean allApplied = true;
         for (MapperReloader reloader : targets) {
             try {
-                int statements = reloader.reload(resourceName(file), content);
+                int statements = reloader.reload("file [" + file + "]", content);
                 logger.info("Reloaded mapper " + xml.namespace() + " (" + statements + " statements) from "
                         + file.getFileName());
             } catch (MapperReloadException ex) {
@@ -156,12 +165,16 @@ public class MapperReloadService implements SmartLifecycle, BeanClassLoaderAware
         if (allApplied) {
             appliedContent.put(file, content);
         }
-        return allApplied;
     }
 
+    /**
+     * namespace를 알고 있는 MapperReloader를 반환한다. 여러 개가 있으면 모두 반환한다. 하나도 없으면, reloaders가
+     * 하나뿐이면 그걸 반환하고, 여러 개면 리스트를 반환한다.
+     */
     private List<MapperReloader> targetsFor(String namespace) {
         List<MapperReloader> all = reloaders;
-        List<MapperReloader> knowing = all.stream().filter(r -> r.knows(namespace)).toList();
+        List<MapperReloader> knowing = all.stream().filter(
+                r -> r.knows(namespace)).toList();
         if (knowing.isEmpty() && all.size() == 1) {
             return all; // 새 mapper 파일. 등록할 곳이 하나뿐이다
         }
@@ -172,6 +185,7 @@ public class MapperReloadService implements SmartLifecycle, BeanClassLoaderAware
      * 에디터는 쓰기 전에 파일을 비우기도 한다. 짧게 한 번 재시도해서 비어 있거나 쓰다 만 파일을 파싱하지 않게 한다.
      */
     private static byte[] readStable(Path file) {
+        // 최대 2번 시도한다. 첫 번째 시도에서 IOException이 나거나, 읽은 내용이 비어 있으면 50ms 기다렸다가 한 번 더 시도한다.
         for (int attempt = 0; attempt < 2; attempt++) {
             try {
                 byte[] content = Files.readAllBytes(file);
@@ -191,10 +205,14 @@ public class MapperReloadService implements SmartLifecycle, BeanClassLoaderAware
         return null;
     }
 
-    private static String resourceName(Path file) {
-        return "file [" + file + "]";
-    }
-
+    /**
+     * {@code mybatis-reload.watch-dirs}를 절대 경로로 해석한다. 존재하지 않는 디렉터리는 무시한다.
+     * mybatis-reload.watch-dirs가 상대 경로이면 작업 디렉터리를 기준으로 해석하고, 절대 경로이면 그대로 쓴다. (빌드 output이 아니라 소스 디렉터리를 감시한다)
+     * <p>
+     * 예를 들어, {@code mybatis-reload.watch-dirs}가 {@code src/main/resources/mappers}이고, 작업 디렉터리가 {@code /home/user/project}이라면,
+     * {@code /home/user/project/src/main/resources/mappers}가 된다.
+     * </p>
+     */
     private List<Path> resolveRoots() {
         Path base = workingDirectory();
         List<Path> roots = new ArrayList<>();
@@ -208,6 +226,9 @@ public class MapperReloadService implements SmartLifecycle, BeanClassLoaderAware
         return roots;
     }
 
+    /**
+     * 현재 작업 디렉터리. 상대 경로를 해석할 때 기준이 된다.
+     */
     private static Path workingDirectory() {
         return Paths.get(System.getProperty("user.dir")).toAbsolutePath();
     }

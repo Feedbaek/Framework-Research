@@ -50,7 +50,7 @@ MyBatis는 시작할 때 mapper XML을 한 번 읽어 `Configuration` 객체 안
 
 ## 3. 전체 구조
 
-저장한 XML은 감시 → 판단 → 교체의 세 단계를 거쳐 `Configuration`에 반영되고, DevTools 쪽에는 "mapper 변경으로는 재시작하지 말라"는 설정만 따로 전달합니다.
+저장한 XML은 감시 → 판단 → 교체의 세 단계를 거쳐 `Configuration`에 반영됩니다. DevTools 쪽에 "mapper 변경으로는 재시작하지 말라"고 알리는 설정은 애플리케이션이 직접 넣습니다.
 
 ```mermaid
 flowchart TB
@@ -60,21 +60,21 @@ flowchart TB
     watcher["MapperFileWatcher<br/>데몬 스레드로 소스 디렉터리 감시<br/>300ms 조용하면 변경 파일을 묶어 전달"]
     service["MapperReloadService<br/>내용이 같으면 건너뜀<br/>namespace로 대상 Configuration 결정"]
     reloader["MapperReloader<br/>XML 항목 제거 → 새 XML 파싱<br/>실패하면 복원"]
-    accessor["ConfigurationAccessor<br/>리플렉션으로 registry 접근"]
+    registries["ConfigurationRegistries<br/>리플렉션으로 registry 접근"]
     config["MyBatis Configuration<br/>statement · resultMap 등의 registry"]
   end
 
   subgraph dev["DevTools 쪽"]
-    epp["MapperReloadDevToolsEnvironmentPostProcessor<br/>컨텍스트 생성 전에 실행<br/>mapper 패턴을 restart exclude에 추가"]
+    yml["애플리케이션 설정<br/>spring.devtools.restart.additional-exclude"]
     devtools["Spring Boot DevTools<br/>build output 감시<br/>mapper 변경은 재시작 안 함"]
   end
 
   src -- "저장" --> watcher
   watcher -- "변경 파일 묶음" --> service
   service -- "파일 내용" --> reloader
-  reloader --> accessor
-  accessor --> config
-  epp -- "exclude 패턴" --> devtools
+  reloader --> registries
+  registries --> config
+  yml -- "exclude 패턴" --> devtools
   devtools -. "Java 등 그 밖의 변경이면 재시작" .-> ctx
 ```
 
@@ -83,12 +83,11 @@ flowchart TB
 | `MapperFileWatcher` | 소스 디렉터리의 `*.xml` 변경을 감지 | build output이 아니라 **소스**를 감시하므로 저장만 하면 됩니다. |
 | `MapperReloadService` | 어떤 파일을 어느 `Configuration`에 적용할지 결정 | Spring bean(`SmartLifecycle`)이라 컨텍스트와 함께 시작하고 종료합니다. |
 | `MapperReloader` | `Configuration` 하나에서 namespace를 교체 | Spring 없이 단독으로도 쓸 수 있습니다. |
-| `ConfigurationAccessor` | MyBatis 내부 registry를 리플렉션으로 꺼냄 | 하위 클래스부터 필드를 찾아 MyBatis-Plus의 `MybatisConfiguration`도 처리합니다. |
+| `ConfigurationRegistries` | MyBatis 내부 registry를 리플렉션으로 꺼냄 | 하위 클래스부터 필드를 찾아 MyBatis-Plus의 `MybatisConfiguration`도 처리합니다. |
 | `MapperPathFilter` | `watch-include` 패턴으로 감시할 파일과 디렉터리를 거름 | 감시 디렉터리 기준 상대 경로에 Ant 패턴을 적용합니다. |
 | `MapperXml` | XML에서 namespace와 `<cache>` 선언 여부만 먼저 읽음 | DTD를 내려받지 않아 빠릅니다. |
-| `MapperReloadDevToolsEnvironmentPostProcessor` | DevTools restart exclude에 mapper 패턴 추가 | bean이 생기기 전에 실행됩니다. |
 
-진입점은 두 개입니다. `MapperReloadDevToolsEnvironmentPostProcessor`는 `META-INF/spring.factories`로, `MapperReloadService`는 auto-configuration(`MapperReloadAutoConfiguration`)으로 등록됩니다.
+진입점은 auto-configuration(`MapperReloadAutoConfiguration`) 하나이며, 여기서 `MapperReloadService`를 등록합니다.
 
 ## 4. 리로드 과정
 
@@ -162,9 +161,9 @@ Java 변경은 DevTools가, mapper XML 변경은 이 라이브러리가 맡고, 
 
 ### 재시작 제외
 
-- `MapperReloadDevToolsEnvironmentPostProcessor`가 컨텍스트가 만들어지기 전에 `mapper/**`, `mappers/**`, `**/*Mapper.xml` 패턴을 `spring.devtools.restart.additional-exclude`에 추가합니다.
-- 그래서 빌드로 mapper XML이 build output에 복사돼도 DevTools는 재시작하지 않습니다.
-- 사용자가 이미 넣어 둔 exclude 값은 유지하고 뒤에 이어 붙입니다.
+- 라이브러리는 DevTools 설정을 건드리지 않습니다. 애플리케이션이 `spring.devtools.restart.additional-exclude`에 mapper XML 위치(예: `mapper/**`)를 직접 지정합니다.
+- 지정하면 빌드로 mapper XML이 build output에 복사돼도 DevTools는 재시작하지 않습니다.
+- 지정하지 않으면 XML을 저장할 때 리로드도 되고, 빌드가 XML을 복사하는 순간 재시작도 일어납니다.
 
 ### 클래스 로더
 

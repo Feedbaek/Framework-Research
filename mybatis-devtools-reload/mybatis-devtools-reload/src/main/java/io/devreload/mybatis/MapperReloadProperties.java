@@ -14,8 +14,6 @@ public class MapperReloadProperties {
 
     public static final String PREFIX = "mybatis-reload";
 
-    static final List<String> DEFAULT_RESTART_EXCLUDE = List.of("mapper/**", "mappers/**", "**/*Mapper.xml");
-
     /**
      * mapper XML 리로드를 켠다. 기본값은 꺼짐이며, 로컬 개발 환경에서만 켠다.
      */
@@ -37,17 +35,6 @@ public class MapperReloadProperties {
      * 마지막 파일 이벤트 이후 리로드하기 전까지 기다리는 시간.
      */
     private Duration debounce = Duration.ofMillis(300);
-
-    /**
-     * {@link #devtoolsRestartExclude}를 {@code spring.devtools.restart.additional-exclude}에 추가해, build
-     * output의 mapper 변경이 DevTools 재시작을 일으키지 않게 한다.
-     */
-    private boolean devtoolsIntegration = true;
-
-    /**
-     * DevTools 재시작을 일으키면 안 되는 mapper 파일의 classpath 상대 Ant 패턴.
-     */
-    private List<String> devtoolsRestartExclude = new ArrayList<>(DEFAULT_RESTART_EXCLUDE);
 
     public boolean isEnabled() {
         return enabled;
@@ -79,21 +66,5 @@ public class MapperReloadProperties {
 
     public void setDebounce(Duration debounce) {
         this.debounce = debounce;
-    }
-
-    public boolean isDevtoolsIntegration() {
-        return devtoolsIntegration;
-    }
-
-    public void setDevtoolsIntegration(boolean devtoolsIntegration) {
-        this.devtoolsIntegration = devtoolsIntegration;
-    }
-
-    public List<String> getDevtoolsRestartExclude() {
-        return devtoolsRestartExclude;
-    }
-
-    public void setDevtoolsRestartExclude(List<String> devtoolsRestartExclude) {
-        this.devtoolsRestartExclude = devtoolsRestartExclude;
     }
 }

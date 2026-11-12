@@ -11,7 +11,9 @@ import org.xml.sax.SAXParseException;
 
 /**
  * MyBatis에 넘기기 전에 mapper XML에서 읽어 두는 최소한의 정보.
- *
+ * 파일이 mapper인지, namespace가 있는지, cache를 선언하는지 정도만 확인한다.
+ * (네트워크 없이 변경을 적용할 namespace와 cache 여부만 파악)
+ * <p>
  * @param namespace      {@code <mapper namespace>} 값
  * @param declaresCache  파일이 {@code <cache>} 요소를 선언하는지 여부
  */

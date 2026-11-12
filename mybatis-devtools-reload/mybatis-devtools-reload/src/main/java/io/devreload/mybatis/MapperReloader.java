@@ -47,16 +47,16 @@ public final class MapperReloader {
 
     private static final String ANNOTATION_RESOURCE_SUFFIX = " (best guess)";
 
-    private final ConfigurationAccessor access;
+    private final ConfigurationRegistries registries;
     private final ClassLoader classLoader;
 
     public MapperReloader(Configuration configuration, ClassLoader classLoader) {
-        this.access = new ConfigurationAccessor(configuration);
+        this.registries = new ConfigurationRegistries(configuration);
         this.classLoader = classLoader;
     }
 
     public Configuration configuration() {
-        return access.configuration();
+        return registries.configuration();
     }
 
     /**
@@ -64,12 +64,12 @@ public final class MapperReloader {
      */
     public boolean knows(String namespace) {
         String prefix = namespace + ".";
-        synchronized (access.configuration()) {
-            return access.loadedResources().contains("namespace:" + namespace)
-                    || hasKeyWithPrefix(access.mappedStatements(), prefix)
-                    || hasKeyWithPrefix(access.resultMaps(), prefix)
-                    || hasKeyWithPrefix(access.sqlFragments(), prefix)
-                    || access.caches().containsKey(namespace);
+        synchronized (registries.configuration()) {
+            return registries.loadedResources().contains("namespace:" + namespace)
+                    || hasKeyWithPrefix(registries.mappedStatements(), prefix)
+                    || hasKeyWithPrefix(registries.resultMaps(), prefix)
+                    || hasKeyWithPrefix(registries.sqlFragments(), prefix)
+                    || registries.caches().containsKey(namespace);
         }
     }
 
@@ -93,10 +93,10 @@ public final class MapperReloader {
             throw new MapperReloadException("Not a MyBatis mapper XML: " + resource, null);
         }
 
-        Configuration configuration = access.configuration();
+        Configuration configuration = registries.configuration();
         synchronized (configuration) {
             Snapshot removed = removeNamespace(xml);
-            access.loadedResources().remove(resource);
+            registries.loadedResources().remove(resource);
             IncompleteTracker incomplete = new IncompleteTracker(configuration);
 
             Thread thread = Thread.currentThread();
@@ -111,7 +111,7 @@ public final class MapperReloader {
                 incomplete.discardAdded();
                 removeNamespace(xml);
                 removed.restore();
-                access.loadedResources().remove(resource);
+                registries.loadedResources().remove(resource);
                 throw new MapperReloadException("Failed to reload " + resource + " (previous SQL kept): "
                         + rootMessage(ex), ex);
             } finally {
@@ -124,12 +124,12 @@ public final class MapperReloader {
     private Snapshot removeNamespace(MapperXml xml) {
         String prefix = xml.namespace() + ".";
 
-        Map<String, Object> statements = removeByIdentity(access.mappedStatements(),
+        Map<String, Object> statements = removeByIdentity(registries.mappedStatements(),
                 (key, value) -> key.startsWith(prefix) && value instanceof MappedStatement ms && !isAnnotation(ms));
 
         // namespace의 애노테이션 statement가 아직 쓰는 result/parameter map은 등록된 채로 둔다.
         Set<Object> retained = identitySet();
-        for (Object value : access.mappedStatements().values()) {
+        for (Object value : registries.mappedStatements().values()) {
             if (value instanceof MappedStatement ms && ms.getId().startsWith(prefix)) {
                 retained.addAll(ms.getResultMaps());
                 if (ms.getParameterMap() != null) {
@@ -138,9 +138,9 @@ public final class MapperReloader {
             }
         }
 
-        Map<String, Object> resultMaps = removeByIdentity(access.resultMaps(),
+        Map<String, Object> resultMaps = removeByIdentity(registries.resultMaps(),
                 (key, value) -> key.startsWith(prefix) && value instanceof ResultMap && !retained.contains(value));
-        Map<String, Object> parameterMaps = removeByIdentity(access.parameterMaps(),
+        Map<String, Object> parameterMaps = removeByIdentity(registries.parameterMaps(),
                 (key, value) -> key.startsWith(prefix) && value instanceof ParameterMap && !retained.contains(value));
 
         // <selectKey> generator는 자기 자신의 (제거된) statement id로 등록돼 있다.
@@ -148,14 +148,14 @@ public final class MapperReloader {
         for (Object value : statements.values()) {
             removedStatementIds.add(((MappedStatement) value).getId());
         }
-        Map<String, Object> keyGenerators = removeByIdentity(access.keyGenerators(),
+        Map<String, Object> keyGenerators = removeByIdentity(registries.keyGenerators(),
                 (key, value) -> removedStatementIds.contains(key));
 
-        Map<String, Object> sqlFragments = removeByIdentity(access.sqlFragments(),
+        Map<String, Object> sqlFragments = removeByIdentity(registries.sqlFragments(),
                 (key, value) -> key.startsWith(prefix));
 
         Map<String, Object> caches = xml.declaresCache()
-                ? removeByIdentity(access.caches(), (key, value) -> key.equals(xml.namespace()))
+                ? removeByIdentity(registries.caches(), (key, value) -> key.equals(xml.namespace()))
                 : Map.of();
 
         return new Snapshot(statements, resultMaps, parameterMaps, keyGenerators, sqlFragments, caches);
@@ -163,7 +163,7 @@ public final class MapperReloader {
 
     private int countXmlStatements(String prefix) {
         Set<Object> distinct = identitySet();
-        for (Map.Entry<String, Object> entry : access.mappedStatements().entrySet()) {
+        for (Map.Entry<String, Object> entry : registries.mappedStatements().entrySet()) {
             if (entry.getKey().startsWith(prefix) && entry.getValue() instanceof MappedStatement ms
                     && !isAnnotation(ms)) {
                 distinct.add(ms);
@@ -237,12 +237,12 @@ public final class MapperReloader {
         void restore() {
             // putAll은 HashMap.putVal을 직접 호출하므로 StrictMap의 중복 검사를 거치지 않는다. 원래 항목
             // (full 키와 short 키)이 있던 그대로 복원된다.
-            access.mappedStatements().putAll(removed.get(0));
-            access.resultMaps().putAll(removed.get(1));
-            access.parameterMaps().putAll(removed.get(2));
-            access.keyGenerators().putAll(removed.get(3));
-            access.sqlFragments().putAll(removed.get(4));
-            access.caches().putAll(removed.get(5));
+            registries.mappedStatements().putAll(removed.get(0));
+            registries.resultMaps().putAll(removed.get(1));
+            registries.parameterMaps().putAll(removed.get(2));
+            registries.keyGenerators().putAll(removed.get(3));
+            registries.sqlFragments().putAll(removed.get(4));
+            registries.caches().putAll(removed.get(5));
         }
     }
 

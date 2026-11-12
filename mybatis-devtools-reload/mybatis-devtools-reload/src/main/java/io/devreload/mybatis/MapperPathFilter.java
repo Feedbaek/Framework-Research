@@ -32,7 +32,7 @@ final class MapperPathFilter {
     }
 
     /**
-     * 파일이 패턴 중 하나와 일치하는가.
+     * 파일이 패턴 중 하나와 일치하는지 확인한다.
      */
     boolean includes(Path root, Path file) {
         if (patterns.isEmpty()) {

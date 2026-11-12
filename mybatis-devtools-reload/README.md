@@ -26,9 +26,16 @@ dependencies {
 ```
 
 ```yaml
+spring:
+  devtools:
+    restart:
+      additional-exclude: mapper/**   # mapper XML 위치에 맞게. DevTools를 쓸 때만 필요
+
 mybatis-reload:
   enabled: true            # 기본 false. 로컬 개발 프로필에서만 켤 것
 ```
+
+DevTools를 함께 쓰면 `spring.devtools.restart.additional-exclude`에 mapper XML 위치(classpath 상대 Ant 패턴)를 직접 지정해야 합니다. 지정하지 않으면 IDE 빌드가 XML을 build output에 복사할 때 DevTools가 재시작하므로, 리로드와 재시작이 둘 다 일어납니다.
 
 | 속성 | 기본값 | 설명 |
 |---|---|---|
@@ -36,8 +43,6 @@ mybatis-reload:
 | `watch-dirs` | `[src/main/resources]` | 감시할 **소스** 디렉터리. 상대 경로는 작업 디렉터리 기준 |
 | `watch-include` | `[]` | `watch-dirs` 기준 상대 Ant 패턴(예: `mapper/**`). 일치하는 XML만 감시하며, 비어 있으면 전체 |
 | `debounce` | `300ms` | 마지막 파일 이벤트 후 대기 시간 |
-| `devtools-integration` | `true` | 아래 패턴을 `spring.devtools.restart.additional-exclude`에 추가 |
-| `devtools-restart-exclude` | `[mapper/**, mappers/**, **/*Mapper.xml]` | DevTools 재시작을 일으키지 않을 classpath 상대 패턴 |
 
 예제 실행:
 
@@ -52,16 +57,16 @@ curl localhost:8080/users   # 재시작 없이 새 SQL 반영
 
 ### DevTools와의 역할 분담
 
-1. `MapperReloadDevToolsEnvironmentPostProcessor`
-   - mapper 패턴을 DevTools restart exclude에 추가합니다.
-   - IDE 빌드로 XML이 build output에 복사돼도 재시작이 일어나지 않습니다.
-   - 사용자가 이미 설정한 값은 유지하고 뒤에 이어 붙입니다.
+1. **재시작 제외** (`spring.devtools.restart.additional-exclude`)
+   - 라이브러리는 DevTools 설정을 건드리지 않습니다. mapper 패턴은 애플리케이션이 직접 지정합니다("사용법" 참고).
+   - 지정하면 IDE 빌드로 XML이 build output에 복사돼도 재시작이 일어나지 않습니다.
 2. `MapperReloadService`
    - 애플리케이션 컨텍스트의 bean(`SmartLifecycle`)입니다.
    - DevTools 재시작 때마다 `SqlSessionFactory`와 함께 종료되고 다시 생성됩니다.
    - watcher 스레드도 컨텍스트 종료 시 정리되므로, 이전 restart classloader를 붙잡지 않습니다.
 3. **소스 디렉터리 감시**
    - build output이 아니라 `src/main/resources`를 감시하므로 저장만 하면 반영됩니다.
+   - DevTools 없이도 동작합니다. 이때 Java 변경은 직접 재시작해야 합니다.
    - 재시작하면 MyBatis는 build output의 XML을 다시 읽습니다. 재시작을 일으킨 빌드가 리소스도 함께 복사하므로 소스와 같은 내용입니다(예외는 "제약" 참고).
 4. **감시 범위 좁히기** (`watch-dirs`, `watch-include`)
    - 감시 비용은 감시 디렉터리 아래의 디렉터리 수에 비례합니다. 리소스 트리가 크면 범위를 좁힙니다.
